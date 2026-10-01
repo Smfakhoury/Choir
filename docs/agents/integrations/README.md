@@ -31,3 +31,7 @@ A note answers the same questions for every tool:
 
 A tool with no note can still fill a slot: the playbook's rules bind it the
 same way, and the note is where what you learn about it goes.
+
+A note covers only where the tool meets Choir; for everything else, use the
+tool's own documentation. Notes track the tool's current release. When a
+change on either side breaks a note, whoever made the change updates it here.
