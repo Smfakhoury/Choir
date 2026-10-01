@@ -85,7 +85,9 @@ def _build_fixture(tmp_path: Path, script: Path) -> tuple[Path, Path, Path, Path
     return home, choir, stubs, work
 
 
-def _run(script: Path, tmp_path: Path, *, bin_on_path: bool) -> subprocess.CompletedProcess[str]:
+def _run(
+    script: Path, tmp_path: Path, *, bin_on_path: bool, from_home: bool = False
+) -> subprocess.CompletedProcess[str]:
     home, choir, stubs, work = _build_fixture(tmp_path, script)
     path = f"{stubs}:/usr/bin:/bin"
     if bin_on_path:
@@ -95,7 +97,7 @@ def _run(script: Path, tmp_path: Path, *, bin_on_path: bool) -> subprocess.Compl
         capture_output=True,
         text=True,
         check=False,
-        cwd=str(work),
+        cwd=str(home if from_home else work),
         env={"HOME": str(home), "PATH": path},
     )
 
@@ -131,6 +133,17 @@ def test_the_manual_pointer_is_written_to_the_working_folder(
     work = tmp_path / "work"
     assert (work / "CLAUDE.md").is_file(), "no pointer in the folder the script ran in"
     assert (work / "AGENTS.md").is_file(), "no pointer in the folder the script ran in"
+
+
+@pytest.mark.parametrize("script", [ORCH_INIT, JOIN], ids=["orchestrator-init", "join"])
+def test_no_pointer_is_written_to_the_home_folder(script: Path, tmp_path: Path) -> None:
+    """Every agent session under the home folder would load a pointer there."""
+    proc = _run(script, tmp_path, bin_on_path=True, from_home=True)
+    home = tmp_path / "home"
+    assert not (home / "AGENTS.md").exists()
+    assert not (home / "CLAUDE.md").exists()
+    assert "ACTION NEEDED" in proc.stdout, proc.stdout
+    assert proc.returncode != 0
 
 
 @pytest.mark.parametrize("script", [ORCH_INIT, JOIN], ids=["orchestrator-init", "join"])

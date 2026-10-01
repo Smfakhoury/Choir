@@ -272,22 +272,27 @@ exclude_locally() {
   done
 }
 
-_wrote=""
-for _pair in "AGENTS.md|docs/agents/ORCHESTRATOR.md" "CLAUDE.md|Read AGENTS.md in this folder"; do
-  _name=${_pair%%|*}
-  _mark=${_pair#*|}
-  case "$_name" in AGENTS.md) _block="$AGENTS_BLOCK" ;; *) _block="$CLAUDE_BLOCK" ;; esac
-  ensure_pointer "$PWD/$_name" "$_mark" "$_block"
-  case "$?" in
-    0) _wrote="$_wrote $_name" ;;
-    2) flag "could not write the playbook pointer to $PWD/$_name" ;;
-  esac
-done
-if [ -n "$_wrote" ]; then
-  exclude_locally
-  echo "ok: playbook pointer added to$_wrote in $PWD"
+# In the home folder the pointer would load into every agent session under it.
+if [ "$PWD" = "$HOME" ]; then
+  flag "run this from the folder you launched your agent in, not your home folder"
 else
-  echo "ok: playbook pointer already in AGENTS.md and CLAUDE.md"
+  _wrote=""
+  for _pair in "AGENTS.md|docs/agents/ORCHESTRATOR.md" "CLAUDE.md|Read AGENTS.md in this folder"; do
+    _name=${_pair%%|*}
+    _mark=${_pair#*|}
+    case "$_name" in AGENTS.md) _block="$AGENTS_BLOCK" ;; *) _block="$CLAUDE_BLOCK" ;; esac
+    ensure_pointer "$PWD/$_name" "$_mark" "$_block"
+    case "$?" in
+      0) _wrote="$_wrote $_name" ;;
+      2) flag "could not write the playbook pointer to $PWD/$_name" ;;
+    esac
+  done
+  if [ -n "$_wrote" ]; then
+    exclude_locally
+    echo "ok: playbook pointer added to$_wrote in $PWD"
+  else
+    echo "ok: playbook pointer already in AGENTS.md and CLAUDE.md"
+  fi
 fi
 
 echo

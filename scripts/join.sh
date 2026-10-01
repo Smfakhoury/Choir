@@ -327,20 +327,25 @@ exclude_locally() {
   done
 }
 
-_wrote=""
-for _name in AGENTS.md CLAUDE.md; do
-  case "$_name" in AGENTS.md) _block="$AGENTS_BLOCK" ;; *) _block="$CLAUDE_BLOCK" ;; esac
-  ensure_pointer "$PWD/$_name" "docs/agents/CONTRIBUTOR.md" "$_block"
-  case "$?" in
-    0) _wrote="$_wrote $_name" ;;
-    2) flag "could not write the manual pointer to $PWD/$_name" ;;
-  esac
-done
-if [ -n "$_wrote" ]; then
-  exclude_locally
-  echo "ok: manual pointer added to$_wrote in $PWD"
+# In the home folder the pointer would load into every agent session under it.
+if [ "$PWD" = "$HOME" ]; then
+  flag "run this from the folder you launched your agent in, not your home folder"
 else
-  echo "ok: manual pointer already in AGENTS.md and CLAUDE.md"
+  _wrote=""
+  for _name in AGENTS.md CLAUDE.md; do
+    case "$_name" in AGENTS.md) _block="$AGENTS_BLOCK" ;; *) _block="$CLAUDE_BLOCK" ;; esac
+    ensure_pointer "$PWD/$_name" "docs/agents/CONTRIBUTOR.md" "$_block"
+    case "$?" in
+      0) _wrote="$_wrote $_name" ;;
+      2) flag "could not write the manual pointer to $PWD/$_name" ;;
+    esac
+  done
+  if [ -n "$_wrote" ]; then
+    exclude_locally
+    echo "ok: manual pointer added to$_wrote in $PWD"
+  else
+    echo "ok: manual pointer already in AGENTS.md and CLAUDE.md"
+  fi
 fi
 
 # --- verdict -------------------------------------------------------------
