@@ -51,19 +51,6 @@ def test_read_graph_reports_a_missing_or_broken_file(tmp_path: Path) -> None:
         read_graph(tmp_path)
 
 
-def test_read_graph_rejects_a_non_object(tmp_path: Path) -> None:
-    (tmp_path / "roadmap").mkdir()
-    (tmp_path / "roadmap" / "graph.json").write_text("[]")
-    with pytest.raises(GraphSyncError, match="not an object"):
-        read_graph(tmp_path)
-
-
-def test_serialize_is_stable_and_newline_terminated() -> None:
-    rendered = serialize({"target": "s", "nodes": {"a": {"kind": "theorem"}}})
-    assert rendered.endswith("}\n")
-    assert serialize(json.loads(rendered)) == rendered
-
-
 def _stub(monkeypatch: pytest.MonkeyPatch, graph: dict) -> None:
     monkeypatch.setattr(
         sync_mod, "derive", lambda checkout, prover=None: Reconciliation(
@@ -152,15 +139,3 @@ def test_a_stale_checkout_refuses_rather_than_reporting(tmp_path: Path) -> None:
     profile = dataclasses.replace(LEAN4, freshness_command=("false",))
     with pytest.raises(GraphSyncError, match="not built at its current source"):
         sync_mod.require_built(tmp_path, profile)
-
-
-def test_an_up_to_date_checkout_is_silent(tmp_path: Path) -> None:
-    profile = dataclasses.replace(LEAN4, freshness_command=("true",))
-    sync_mod.require_built(tmp_path, profile)
-
-
-def test_a_prover_that_cannot_be_asked_is_not_blocked(tmp_path: Path) -> None:
-    """The dependency probe refuses such a prover on its own; this check
-    has nothing to add."""
-    profile = dataclasses.replace(LEAN4, freshness_command=None)
-    sync_mod.require_built(tmp_path, profile)

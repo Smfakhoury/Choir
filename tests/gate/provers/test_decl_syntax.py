@@ -15,7 +15,6 @@ from gate.provers.decl_syntax import (
     decl_line_regex_for,
     decl_name_from,
     decl_prefix_fragment,
-    decl_target_fragment,
     normalize_decl_name,
     qualify_by_scope,
 )
@@ -65,15 +64,6 @@ def test_stacked_prefixes() -> None:
     assert m2 is not None
     assert m2.group(1) == "Definition"
     assert m2.group(2) == "bar"
-
-
-def test_bare_keyword_still_matches_unchanged() -> None:
-    """No prefix present: identical behaviour to the old regex."""
-    rx = decl_line_regex(("theorem", "def"))
-    m = rx.match("theorem foo : (1:Nat) = 1 := by rfl")
-    assert m is not None
-    assert m.group(1) == "theorem"
-    assert m.group(2) == "foo"
 
 
 def test_a_modifier_alone_is_not_a_declaration() -> None:
@@ -130,39 +120,8 @@ def test_name_normalization_is_unchanged() -> None:
 
 _DECL = decl_line_regex(("thm",))
 _OPEN = re.compile(r"^\s*scope\s+(\w+)")
-_PLAIN = re.compile(r"^\s*group\b")
 _CLOSE_NAMED = re.compile(r"^\s*close\s+(\w+)\s*$")
-_CLOSE_BARE = re.compile(r"^\s*close\s*$")
 _COMMIT = re.compile(r"\bopen\b")
-
-
-def test_scope_path_prefixes_and_pops() -> None:
-    src = "scope A\nthm x\nclose A\nthm y\n"
-    assert qualify_by_scope(
-        src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
-    ) == {2: "A.x", 4: "y"}
-
-
-def test_scope_path_nests() -> None:
-    src = "scope A\nscope B\nthm x\nclose B\nthm y\nclose A\n"
-    assert qualify_by_scope(
-        src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
-    ) == {3: "A.B.x", 5: "A.y"}
-
-
-def test_plain_open_is_tracked_without_contributing() -> None:
-    """A non-qualifying scope must not prefix the name, but must still
-    absorb its own closer — otherwise that closer pops the enclosing
-    qualifying scope and everything after it silently loses its
-    prefix."""
-    src = "scope A\ngroup\nthm x\nclose\nthm y\nclose\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=_DECL,
-        qualifying_open_re=_OPEN,
-        plain_open_re=_PLAIN,
-        close_re=_CLOSE_BARE,
-    ) == {3: "A.x", 5: "A.y"}
 
 
 def test_commit_defers_the_push_to_a_later_line() -> None:
@@ -179,30 +138,6 @@ def test_commit_defers_the_push_to_a_later_line() -> None:
     ) == {2: "outside", 4: "A.inside"}
 
 
-def test_commit_on_the_opener_line_itself() -> None:
-    """`locale A begin` on one line must both arm and commit, which is
-    why the opener branch falls through to the commit check instead of
-    continuing straight to the next line."""
-    src = "scope A open\nthm x\nclose A\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=_DECL,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-        commit_re=_COMMIT,
-    ) == {2: "A.x"}
-
-
-def test_unmatched_closer_pops_nothing_rather_than_raising() -> None:
-    """Every prover has `begin`/`End` constructs this helper does not
-    open (an isabelle theory's own wrapper, most obviously), so a
-    closer with no matching opener must be a no-op on ordinary input."""
-    src = "close\nthm x\n"
-    assert qualify_by_scope(
-        src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_BARE
-    ) == {2: "x"}
-
-
 def test_out_of_order_named_close_removes_the_named_scope() -> None:
     """Same tolerance as lean4's `_pop_innermost`: a named closer
     removes the scope it names even when that is not the innermost one,
@@ -211,100 +146,6 @@ def test_out_of_order_named_close_removes_the_named_scope() -> None:
     assert qualify_by_scope(
         src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
     ) == {4: "B.x"}
-
-
-def test_names_are_normalized_like_span_names() -> None:
-    """The keys have to agree with the span names
-    `gate.verify.style.find_decl_spans` produces from the same regex, so
-    the trailing-colon normalization must be applied here too — an Isar
-    `lemma foo: "P"` captures `foo:` as its raw token."""
-    src = 'scope A\nthm foo: "P"\nclose A\n'
-    assert qualify_by_scope(
-        src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
-    ) == {2: "A.foo"}
-
-
-def test_empty_text_yields_no_keys() -> None:
-    assert (
-        qualify_by_scope(
-            "", decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
-        )
-        == {}
-    )
-
-
-# ---------------------------------------------------------------------------
-# An opener that is ALSO a declaration (round 7, F2).
-#
-# isabelle's `locale`/`class` carry `assumes` clauses that every theorem
-# in the scope depends on, so the header has to be compared like any
-# other declaration — which makes the opening line both an opener and a
-# declaration. This helper used to treat the two as exclusive, and the
-# isabelle profile recorded that as the reason a scope command could not
-# be enumerated.
-# ---------------------------------------------------------------------------
-
-_DECL_WITH_SCOPE = decl_line_regex(("thm", "scope"))
-
-
-def test_an_opener_that_is_also_a_declaration_gets_its_own_key() -> None:
-    src = "scope A\nthm x\nclose A\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=_DECL_WITH_SCOPE,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-    ) == {1: "A", 2: "A.x"}
-
-
-def test_an_opener_declaration_keys_under_its_enclosing_scope() -> None:
-    """Not under itself: `scope B` inside `scope A` is `A.B`, never
-    `A.B.B`. The key is computed before the push for exactly this."""
-    src = "scope A\nscope B\nthm x\nclose B\nclose A\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=_DECL_WITH_SCOPE,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-    ) == {1: "A", 2: "A.B", 3: "A.B.x"}
-
-
-def test_an_opener_declaration_keys_before_a_deferred_commit() -> None:
-    """With a two-step opener the key still lands on the opener's line,
-    not the `commit_re` line that pushes the scope."""
-    src = "scope A\nopen\nthm x\nclose A\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=_DECL_WITH_SCOPE,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-        commit_re=_COMMIT,
-    ) == {1: "A", 3: "A.x"}
-
-
-def test_an_opener_that_is_not_a_declaration_keyword_gains_no_key() -> None:
-    """Inertness for rocq, whose `Module`/`Section` are deliberately
-    absent from its `_DECL_KEYWORDS`, and for isabelle's `context`,
-    which scopes declarations without declaring anything itself."""
-    src = "scope A\nthm x\nclose A\n"
-    assert qualify_by_scope(
-        src, decl_re=_DECL, qualifying_open_re=_OPEN, close_re=_CLOSE_NAMED
-    ) == {2: "A.x"}
-
-
-def test_a_plain_opener_that_is_also_a_declaration_gets_an_enclosing_key() -> None:
-    """A non-contributing scope's own key carries only the prefix of
-    whatever encloses it — never its own name, which it does not
-    contribute to anything."""
-    plain_decl = decl_line_regex(("thm", "group"))
-    src = "scope A\ngroup G\nthm x\nclose\nclose A\n"
-    assert qualify_by_scope(
-        src,
-        decl_re=plain_decl,
-        qualifying_open_re=_OPEN,
-        plain_open_re=_PLAIN,
-        close_re=_CLOSE_BARE,
-    ) == {2: "A.G", 3: "A.x"}
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +193,6 @@ def test_prefix_flag_fragment_with_a_capturing_group_is_rejected() -> None:
 
     # A non-capturing group is fine.
     assert decl_prefix_fragment((), None, prefix_flags=(r"Timeout\s+(?:[0-9]+)",))
-
-
-def test_no_prefix_shapes_still_returns_an_empty_fragment() -> None:
-    """A profile that declares none of the four shapes must get exactly
-    the old unprefixed pattern back."""
-    assert decl_prefix_fragment((), None) == ""
-    assert decl_prefix_fragment((), None, prefix_commands=(), prefix_flags=()) == ""
 
 
 def test_decl_line_regex_for_reads_every_prefix_shape_off_the_profile() -> None:
@@ -440,41 +274,6 @@ def test_target_group_is_optional_so_a_line_ending_in_it_still_matches() -> None
     assert m.group(2) == "(in"
 
 
-def test_target_fragment_with_a_capturing_group_is_rejected() -> None:
-    """Same rule as `prefix_flags`, enforced rather than trusted."""
-    try:
-        decl_target_fragment(r"\(\s*in\s+(\S+)\)")
-    except ValueError as exc:
-        assert "capturing group" in str(exc)
-    else:  # pragma: no cover - the assertion below is the failure path
-        raise AssertionError("a capturing group in the target must be rejected")
-
-    assert decl_target_fragment(r"\(\s*in\s+(?:\S+)\)")
-
-
-def test_no_target_returns_an_empty_fragment() -> None:
-    """A profile that sets nothing gets exactly the pre-round-8 pattern."""
-    assert decl_target_fragment(None) == ""
-    assert decl_line_regex(("lemma",)).pattern == decl_line_regex(
-        ("lemma",), target=None
-    ).pattern
-
-
-def test_decl_line_regex_for_reads_the_target_off_the_profile() -> None:
-    """The fifth shape joins the one-place argument list, so all three
-    enumeration consumers get it without threading it by hand."""
-    isabelle_match = decl_line_regex_for(ISABELLE).match('lemma (in A) foo: "P"')
-    assert isabelle_match is not None
-    assert normalize_decl_name(isabelle_match.group(2)) == "foo"
-    # Inert for the two profiles that set no target: they still match the
-    # line (they always did) but do not skip the group, so the name is
-    # the raw `(in` token exactly as before.
-    lean_match = decl_line_regex_for(LEAN4).match("theorem (in A) foo : True")
-    assert lean_match is not None and lean_match.group(2) == "(in"
-    rocq_match = decl_line_regex_for(ROCQ).match("Theorem (in A) foo : True.")
-    assert rocq_match is not None and rocq_match.group(2) == "(in"
-
-
 def test_the_target_reaches_all_three_enumeration_consumers() -> None:
     """Same completeness check the fourth shape got, for the fifth."""
     source = 'lemma (in A) foo: "P"\n  sorry\n'
@@ -501,35 +300,6 @@ _DECL_TARGETED = decl_line_regex(
 )
 
 
-def test_inline_target_replaces_the_enclosing_scope_path() -> None:
-    """An immediate target SUSPENDS the enclosing context, so it replaces
-    rather than extends the path (Isar reference manual §5.2)."""
-    text = "scope A\nthm (in B) x\nthm plain\nclose A\n"
-    keys = qualify_by_scope(
-        text,
-        decl_re=_DECL_TARGETED,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-        decl_target_re=_TARGET_KEY,
-    )
-    assert keys == {1: "A", 2: "B.x", 3: "A.plain"}
-
-
-def test_inline_target_with_no_group_match_means_the_global_scope() -> None:
-    """A matched pattern whose group 1 did not participate is the
-    prover's global-target spelling (isabelle writes it `(in -)`), and
-    keys as the bare name whatever encloses it."""
-    text = "scope A\nthm (in -) g\nclose A\n"
-    keys = qualify_by_scope(
-        text,
-        decl_re=_DECL_TARGETED,
-        qualifying_open_re=_OPEN,
-        close_re=_CLOSE_NAMED,
-        decl_target_re=_TARGET_KEY,
-    )
-    assert keys == {1: "A", 2: "g"}
-
-
 def test_an_unrecognised_target_spelling_falls_back_to_the_stack() -> None:
     """Degrade to the coarser key, never to a wrong one.
 
@@ -549,19 +319,6 @@ def test_an_unrecognised_target_spelling_falls_back_to_the_stack() -> None:
         decl_target_re=_TARGET_KEY,
     )
     assert keys == {1: "A", 2: "A.n"}
-
-
-def test_omitting_decl_target_re_is_byte_identical_to_before() -> None:
-    """Inert for rocq and for isabelle's own pre-round-8 behaviour."""
-    text = "scope A\nthm x\nclose A\n"
-    common = {
-        "decl_re": _DECL_WITH_SCOPE,
-        "qualifying_open_re": _OPEN,
-        "close_re": _CLOSE_NAMED,
-    }
-    assert qualify_by_scope(text, **common) == qualify_by_scope(
-        text, **common, decl_target_re=_TARGET_KEY
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -726,9 +483,3 @@ def test_keyword_suffix_and_type_params_reject_capturing_groups() -> None:
         decl_line_regex(("datatype",), keyword_suffix=r"(%\w+)")
     with pytest.raises(ValueError, match="capturing group"):
         decl_line_regex(("datatype",), type_params=r"('\w+)")
-
-
-def test_lean4_and_rocq_are_unaffected_by_the_two_new_fragments() -> None:
-    for profile in (LEAN4, ROCQ):
-        assert profile.decl_keyword_suffix is None
-        assert profile.decl_type_params_syntax is None

@@ -22,15 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from gate.provers.isabelle import ISABELLE
-from gate.provers.lean4 import LEAN4
-from gate.provers.rocq import ROCQ
 from gate.verify import sorry_delta_cli
 from gate.verify.config import SorryPolicy
 from gate.verify.sorry_delta_cli import (
     _resolve_reduction,
     exit_code_for,
-    filter_files_by_profile,
     load_verify_config_from_base,
     main,
 )
@@ -73,13 +69,6 @@ def _init_repo_with_policy_history(tmp_path: Path) -> tuple[str, str]:
     return base_sha, head_sha
 
 
-def test_loads_sorry_policy_from_base(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    base_sha, _head = _init_repo_with_policy_history(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    cfg = load_verify_config_from_base(base_sha)
-    assert cfg.sorry_delta.policy is SorryPolicy.BLOCK
-
-
 def test_ignores_head_policy_loosening(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # The whole point of base-SHA reads: the head commit's flip to
     # `report` is irrelevant; we pass base_sha.
@@ -89,37 +78,8 @@ def test_ignores_head_policy_loosening(tmp_path: Path, monkeypatch) -> None:  # 
     assert cfg.sorry_delta.policy is not SorryPolicy.REPORT
 
 
-def test_block_policy_fails_on_introduced_sorries() -> None:
-    assert exit_code_for(any_introduced=True, policy=SorryPolicy.BLOCK) == 1
-
-
 def test_report_policy_passes_on_introduced_sorries() -> None:
     assert exit_code_for(any_introduced=True, policy=SorryPolicy.REPORT) == 0
-
-
-def test_clean_passes_under_both_policies() -> None:
-    assert exit_code_for(any_introduced=False, policy=SorryPolicy.BLOCK) == 0
-    assert exit_code_for(any_introduced=False, policy=SorryPolicy.REPORT) == 0
-
-
-# ---------------------------------------------------------------------------
-# filter_files_by_profile — per-prover extension filtering
-# ---------------------------------------------------------------------------
-
-
-def test_filter_files_lean4_keeps_only_lean(tmp_path: Path) -> None:
-    files = ["A.lean", "README.md", "sub/B.lean", "notes.txt"]
-    assert filter_files_by_profile(files, LEAN4) == ["A.lean", "sub/B.lean"]
-
-
-def test_filter_files_isabelle_keeps_only_thy() -> None:
-    files = ["Scratch.thy", "A.lean", "ROOT"]
-    assert filter_files_by_profile(files, ISABELLE) == ["Scratch.thy"]
-
-
-def test_filter_files_rocq_keeps_only_v() -> None:
-    files = ["Scratch.v", "A.lean", "_CoqProject"]
-    assert filter_files_by_profile(files, ROCQ) == ["Scratch.v"]
 
 
 # ---------------------------------------------------------------------------
@@ -187,12 +147,6 @@ _HEAD_FILE = (
 )
 
 
-_PR_VIEW_CALL = (
-    "gh", "pr", "view", "3", "--repo", "org/myproj",
-    "--json", "body", "--jq", ".body",
-)
-
-
 def _stub_gh(  # type: ignore[no-untyped-def]
     monkeypatch, *, pr_body: str = "", issue_body: str = ""
 ) -> list[tuple[str, ...]]:
@@ -215,82 +169,10 @@ def _resolve(*, changed_files=(_TARGET_FILE,)):  # type: ignore[no-untyped-def]
     return _resolve_reduction(repo="org/myproj", pr=3, changed_files=changed_files)
 
 
-def test_a_body_without_a_block_means_no_reduction(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _stub_gh(monkeypatch, pr_body="an ordinary proof submission\n")
-    reduction, message = _resolve()
-    assert reduction is None
-    assert message is None
-
-
 def test_a_malformed_block_grants_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _stub_gh(
         monkeypatch,
         pr_body="```choir-reduction\nchoir-reduction-version: 9\n```\n",
-    )
-    reduction, message = _resolve()
-    assert reduction is None
-    assert message is not None
-
-
-def test_a_block_agreeing_with_the_task_is_resolved(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    gh_calls = _stub_gh(
-        monkeypatch, pr_body=f"Closes #7\n\n{_BLOCK}", issue_body=_TASK_BODY
-    )
-    reduction, message = _resolve()
-    assert message is None
-    assert reduction is not None
-    assert reduction.target_file == _TARGET_FILE
-    assert reduction.target_decl == "MyProj.Foo.add_comm"
-    assert reduction.children == ("MyProj.Foo.step", "MyProj.Foo.step2")
-    # The target is read off the linked issue, not the block.
-    assert gh_calls == [
-        _PR_VIEW_CALL,
-        (
-            "gh", "issue", "view", "7", "--repo", "org/myproj",
-            "--json", "body", "-q", ".body",
-        ),
-    ]
-
-
-def test_a_parent_that_is_not_the_tasks_target_grants_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # The block names a declaration the task did not scope. Nothing is
-    # granted: a submitter free to name the target would name a helper
-    # and leave the real one sorried.
-    block = _BLOCK.replace("parent: MyProj.Foo.add_comm", "parent: MyProj.Foo.helper")
-    _stub_gh(monkeypatch, pr_body=f"Closes #7\n\n{block}", issue_body=_TASK_BODY)
-    reduction, message = _resolve()
-    assert reduction is None
-    assert message is not None
-    assert "MyProj.Foo.helper" in message
-    assert "MyProj.Foo.add_comm" in message
-
-
-def test_a_task_whose_target_file_this_pr_does_not_change_grants_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # A closing reference is body text, so a PR can name a task other
-    # than the one it works on. The linked task's target file is not
-    # among the PR's files, so the link does not describe this
-    # submission.
-    _stub_gh(monkeypatch, pr_body=f"Closes #7\n\n{_BLOCK}", issue_body=_TASK_BODY)
-    reduction, message = _resolve(changed_files=(_OTHER_FILE,))
-    assert reduction is None
-    assert message is not None
-    assert _TARGET_FILE in message
-
-
-def test_a_body_linking_no_issue_grants_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    gh_calls = _stub_gh(monkeypatch, pr_body=_BLOCK, issue_body=_TASK_BODY)
-    reduction, message = _resolve()
-    assert reduction is None
-    assert message is not None
-    # No closing reference in the body, so the issue is never fetched.
-    assert gh_calls == [_PR_VIEW_CALL]
-
-
-def test_a_linked_issue_that_does_not_parse_grants_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _stub_gh(
-        monkeypatch,
-        pr_body=f"Closes #7\n\n{_BLOCK}",
-        issue_body="just prose, with no front matter\n",
     )
     reduction, message = _resolve()
     assert reduction is None

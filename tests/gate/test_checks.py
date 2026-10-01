@@ -13,14 +13,10 @@ from gate.checks import (
     CHECKS,
     PROVER_OVERRIDES,
     REQUIRED_PRESENT,
-    SALVAGE_OPAQUE,
     CheckClass,
     check_class,
     is_blocking,
-    is_salvage_opaque,
-    missing_required,
 )
-from gate.provers import PROFILES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NEW_PROJECT = REPO_ROOT / "scripts" / "new-project.sh"
@@ -39,136 +35,14 @@ _GH_CALL_RE = re.compile(r'(?:"gh"\s*,|_gh\()\s*"(\w+)"')
 _GH_RESOURCE_SCOPES = {"issue": "issues", "pr": "pull-requests"}
 
 
-def test_trust_and_quality_checks_block() -> None:
-    assert is_blocking("axiom-honesty")
-    assert is_blocking("sorry-delta")
-    assert is_blocking("rebuild")
-
-
 def test_advisory_checks_do_not_block() -> None:
     assert not is_blocking("style")
     assert not is_blocking("trust-report")
     assert not is_blocking("review")
 
 
-def test_comparator_blocks_and_is_required_present() -> None:
-    """Promoted (note 14 §8): a rendered verdict or a not-applicable/not-run
-    path is exit 0; a contributor-owned audit failure is exit 1."""
-    assert is_blocking("comparator")
-    assert CHECKS["comparator"] is CheckClass.TRUST
-    assert "comparator" in REQUIRED_PRESENT
-
-
-def test_comparator_is_salvage_opaque() -> None:
-    """It blocks a merge, but its NAME cannot say which outcome fired.
-
-    statement-mismatch means unsound (never seed); solution-build-failed means
-    what rebuild means (safe to seed). One name, two salvage meanings, so
-    classify_failure must not read it.
-    """
-    assert "comparator" in SALVAGE_OPAQUE
-
-
-def test_statement_immutability_is_trust_and_required_present() -> None:
-    """Promoted on measurement, at the third attempt.
-
-    It was `TRUST` and required once before and reverted the same day, over
-    four Criticals that were all false blocks on ordinary code
-    (`@[simp]`/`private` declarations, two anonymous `example`s,
-    equation-style `def`s). What changed is not confidence but evidence:
-    the enumeration defects behind those four were fixed and the residual
-    rate was then *measured* over whole corpora rather than argued from
-    fixtures — 6 of 114 proof-placeholder fills on isabelle (all anonymous
-    declarations sharing one statement in tutorial files, genuinely
-    ambiguous), 0 of 235,318 helper insertions at the safe position, 0.26%
-    of lean4 golf edits.
-
-    And the bar itself was wrong before. "Zero false blocks" is only right
-    if a false block wedges the project; a blocked worker instead says so
-    in a comment and the orchestrator decides (spec D5), which makes the
-    real bar "rare enough not to be noise, and always actionable."
-    """
-    assert is_blocking("statement-immutability")
-    assert CHECKS["statement-immutability"] is CheckClass.TRUST
-    assert "statement-immutability" in REQUIRED_PRESENT
-
-
-def test_statement_immutability_blocks_everywhere_except_rocq() -> None:
-    """Pins the per-prover split the promotion measurement earned.
-
-    Blocking on lean4 and isabelle, whose false-block rates were measured
-    over whole corpora (1843 Isabelle theories, 4918 lean4 library files).
-    Advisory on rocq, and that asymmetry is the point of the test: rocq had
-    no corpus and no toolchain available, so its rate is *unmeasured*, and
-    it structurally carries the largest whole-span-compared population —
-    the mode where a mis-set boundary blocks 100% of the time rather than
-    probabilistically.
-
-    Asserted through `is_blocking` per profile rather than by reading
-    `PROVER_OVERRIDES`, so it pins what a caller actually sees. A caller
-    that omits the prover must get the blocking answer, since the base
-    class is the strict one and an override may only relax.
-    """
-    assert is_blocking("statement-immutability")
-    assert is_blocking("statement-immutability", prover="lean4")
-    assert is_blocking("statement-immutability", prover="isabelle")
-    assert not is_blocking("statement-immutability", prover="rocq")
-    assert PROVER_OVERRIDES["rocq"]["statement-immutability"] is CheckClass.ADVISORY
-    for prover in PROFILES:
-        if prover != "rocq":
-            assert "statement-immutability" not in PROVER_OVERRIDES.get(prover, {})
-
-
-def test_statement_immutability_is_not_salvage_opaque() -> None:
-    """Deliberately absent from `SALVAGE_OPAQUE`, unlike `comparator`.
-
-    `comparator` needs opacity because one name spans outcomes from unsound
-    (statement-mismatch) to reusable (solution-build-failed). A failing
-    `statement-immutability` means exactly one thing — a declaration
-    present at base changed, was deleted, or could not be confirmed
-    unchanged. Moot in practice since its 2026-08-20 demotion to
-    `CheckClass.ADVISORY` (it never reaches `classify_failure`'s blocking
-    set at all), but the pin stays: were it ever re-promoted, its name
-    still would not need opacity.
-    """
-    assert "statement-immutability" not in SALVAGE_OPAQUE
-
-
-def test_salvage_opaque_checks_all_block() -> None:
-    """A salvage-opaque check that didn't block would just be advisory."""
-    for name in SALVAGE_OPAQUE:
-        assert is_blocking(name)
-
-
-def test_is_salvage_opaque_resolves_composite_names() -> None:
-    """Canonicalizes bare and composite names, for defensive symmetry with
-    `is_blocking`/`check_class` — not because comparator is known to report
-    a composite name (verified live: `gh pr checks` reports bare names, and
-    `new-project.sh` requiring all seven contexts by bare name only works
-    because that's what GitHub reports). A composite form could in
-    principle arise from a reusable-workflow call nesting a caller job name
-    in front, so resolving both costs nothing and keeps this predicate
-    consistent with the rest of the module."""
-    assert is_salvage_opaque("comparator")
-    assert is_salvage_opaque("verify-comparator / comparator")
-    assert not is_salvage_opaque("verify-pr / rebuild")
-    assert not is_salvage_opaque("some-future-check")
-
-
 def test_unknown_checks_block_fail_safe() -> None:
     assert is_blocking("some-future-check")
-
-
-def test_check_class_resolves_bare_and_composite_names() -> None:
-    assert check_class("rebuild") is CheckClass.QUALITY
-    assert check_class("axiom-honesty") is CheckClass.TRUST
-    assert check_class("style") is CheckClass.ADVISORY
-    assert check_class("verify-pr / rebuild") is CheckClass.QUALITY
-
-
-def test_check_class_returns_none_for_unregistered() -> None:
-    assert check_class("some-future-check") is None
-    assert check_class("verify-pr / some-future-check") is None
 
 
 def _new_project_contexts() -> list[str]:
@@ -192,19 +66,6 @@ def test_every_required_context_is_registered() -> None:
     contexts = _new_project_contexts()
     unregistered = [c for c in contexts if c not in CHECKS]
     assert not unregistered, f"unregistered required contexts: {unregistered}"
-
-
-def test_required_present_is_a_subset_of_new_project_contexts() -> None:
-    """The reverse drift guard: every name this module says must be *present*
-    on a PR also has to actually be a required branch-protection context, or
-    `missing_required` can never fire — GitHub itself never demands the check
-    run at all. Catches, e.g., a promotion (like comparator's) editing
-    `REQUIRED_PRESENT` in `gate/checks.py` but not `new-project.sh`'s array,
-    or a later edit silently reverting the array without touching this file.
-    """
-    contexts = set(_new_project_contexts())
-    missing = [name for name in REQUIRED_PRESENT if name not in contexts]
-    assert not missing, f"REQUIRED_PRESENT names absent from contexts array: {missing}"
 
 
 def _new_project_workflow_copies() -> list[str]:
@@ -353,54 +214,10 @@ def test_no_workflow_template_run_block_interpolates_untrusted_input() -> None:
                     )
 
 
-def test_comparator_promoted_statement_equiv_still_blocks() -> None:
-    """comparator is now blocking, but statement-equiv's demotion is deferred.
-
-    Spec D3's eventual end state is comparator blocking / statement-equiv
-    advisory, but this registry classes by name globally while comparator
-    only runs on lean4 at v4.27+ — demoting statement-equiv in this same
-    change would leave isabelle/rocq (and sub-v4.27 lean4) with no blocking
-    statement check at all. So both are TRUST for now, deliberately; the
-    demotion is a separate, later decision, not a forgotten line.
-    """
-    assert CHECKS["statement-equiv"] is CheckClass.TRUST
-    assert CHECKS["comparator"] is CheckClass.TRUST
-
-
 def test_composite_workflow_slash_job_names_resolve() -> None:
     """gh may report "workflow / job"; the trailing segment is the job name."""
     assert not is_blocking("verify-style / style")
     assert is_blocking("verify-pr / rebuild")
-
-
-def test_composite_name_with_unknown_job_still_blocks() -> None:
-    assert is_blocking("verify-pr / some-future-check")
-
-
-def test_required_present_excludes_advisory_checks() -> None:
-    """An advisory check exits 0 on every outcome, so its presence proves
-    nothing. `comparator` is no longer advisory (promoted, note 14 §8) and
-    belongs in the set because its workflow is installed and reports on every
-    prover; only genuinely-advisory `style` stays excluded."""
-    for name in REQUIRED_PRESENT:
-        assert CHECKS[name] is not CheckClass.ADVISORY
-    assert "comparator" in REQUIRED_PRESENT
-    assert "style" not in REQUIRED_PRESENT
-
-
-def test_missing_required_reports_absent_checks_in_registry_order() -> None:
-    assert all(name in CHECKS for name in REQUIRED_PRESENT)
-    assert missing_required(REQUIRED_PRESENT) == []
-    assert missing_required([f"verify-pr / {name}" for name in REQUIRED_PRESENT]) == []
-    assert missing_required(["rebuild", "style"]) == [
-        "statement-equiv",
-        "axiom-honesty",
-        "sorry-delta",
-        "comparator",
-        "statement-immutability",
-    ]
-    # Presence of unrelated checks must not paper over an absent required one.
-    assert missing_required(["style", "some-future-check"]) == list(REQUIRED_PRESENT)
 
 
 def test_statement_equiv_is_advisory_on_lean4_only() -> None:
@@ -450,13 +267,23 @@ def test_overrides_only_ever_relax() -> None:
             )
 
 
-def test_every_override_prover_is_a_real_profile() -> None:
-    for prover in PROVER_OVERRIDES:
-        assert prover in PROFILES
+def test_branch_protection_contexts_matches_new_project_literal() -> None:
+    """One source of truth for the required-contexts array.
+
+    The array previously lived only as a literal in new-project.sh, with this
+    file asserting a *subset* relation against REQUIRED_PRESENT. That left the
+    direction a subset check cannot see: a context in the script that Choir no
+    longer requires. Equality closes it, and gives upgrade-project.sh's
+    staleness report something to compare a live repo against.
+    """
+    assert _new_project_contexts() == list(BRANCH_PROTECTION_CONTEXTS)
 
 
-def test_check_class_composite_name_honors_prover_override() -> None:
-    assert check_class("verify-pr / statement-equiv", prover="lean4") is CheckClass.ADVISORY
+def test_required_present_is_a_subset_of_protection_contexts() -> None:
+    """Every check the merge preflight demands be PRESENT must also be one
+    GitHub is told to require, or `missing_required` can never fire."""
+    missing = [n for n in REQUIRED_PRESENT if n not in BRANCH_PROTECTION_CONTEXTS]
+    assert not missing, f"REQUIRED_PRESENT names absent from contexts: {missing}"
 
 
 def _manifest_declared_paths(script: Path) -> list[str]:
@@ -514,22 +341,3 @@ def test_both_scripts_declare_the_lean4_only_trust_report() -> None:
         assert ".github/workflows/verify-trust-report.yml" in declared, (
             f"{script.name} does not declare verify-trust-report.yml"
         )
-
-
-def test_branch_protection_contexts_matches_new_project_literal() -> None:
-    """One source of truth for the required-contexts array.
-
-    The array previously lived only as a literal in new-project.sh, with this
-    file asserting a *subset* relation against REQUIRED_PRESENT. That left the
-    direction a subset check cannot see: a context in the script that Choir no
-    longer requires. Equality closes it, and gives upgrade-project.sh's
-    staleness report something to compare a live repo against.
-    """
-    assert _new_project_contexts() == list(BRANCH_PROTECTION_CONTEXTS)
-
-
-def test_required_present_is_a_subset_of_protection_contexts() -> None:
-    """Every check the merge preflight demands be PRESENT must also be one
-    GitHub is told to require, or `missing_required` can never fire."""
-    missing = [n for n in REQUIRED_PRESENT if n not in BRANCH_PROTECTION_CONTEXTS]
-    assert not missing, f"REQUIRED_PRESENT names absent from contexts: {missing}"

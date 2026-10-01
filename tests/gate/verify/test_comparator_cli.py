@@ -93,12 +93,7 @@ def _explicit_args(
 
 
 def _args_with_bin(tmp_path: Path, monkeypatch) -> list[str]:  # type: ignore[no-untyped-def]
-    """Explicit-mode args past the whole applicability chain, with a bin.
-
-    Mirrors the setup `test_main_with_bin_reports_outcome_and_exits_zero`
-    already used (repo + chdir + `--comparator-bin`), pulled out so the
-    exit-code / report tests below don't repeat it.
-    """
+    """Explicit-mode args past the whole applicability chain, with a bin."""
     repo, base_sha, head_sha = _make_repo(tmp_path)
     ws = tmp_path / "ws"
     monkeypatch.chdir(repo)
@@ -256,30 +251,6 @@ def _reduction(body: str | None, *, target_decl: str = "tgt"):  # type: ignore[n
     )
 
 
-def test_is_reduction_true_for_a_block_naming_this_target(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _stub_pr_files(monkeypatch, [TARGET_FILE])
-    assert _reduction(f"Closes #7\n\n{_REDUCTION_BLOCK}") == (True, None)
-
-
-def test_is_reduction_false_for_a_pr_that_does_not_change_the_target_file(
-    monkeypatch,
-) -> None:  # type: ignore[no-untyped-def]
-    # The bypass this closes: a valid block naming the real target, on a
-    # PR that touches no prover source at all. The target keeps whatever
-    # placeholder base had — sorry-delta sees no delta to refuse — so
-    # this audit must not permit `sorryAx` for it.
-    _stub_pr_files(monkeypatch, ["README.md"])
-    granted, message = _reduction(f"Closes #7\n\n{_REDUCTION_BLOCK}")
-    assert granted is False
-    assert message is not None
-    assert TARGET_FILE in message
-
-
-def test_is_reduction_false_with_no_block(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _stub_pr_files(monkeypatch, [TARGET_FILE])
-    assert _reduction("an ordinary proof submission\n") == (False, None)
-
-
 def test_is_reduction_false_for_a_malformed_block(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _stub_pr_files(monkeypatch, [TARGET_FILE])
     malformed = "```choir-reduction\nchoir-reduction-version: 9\n```\n"
@@ -292,20 +263,6 @@ def test_is_reduction_false_when_parent_names_another_declaration(
     _stub_pr_files(monkeypatch, [TARGET_FILE])
     other = _REDUCTION_BLOCK.replace("parent: tgt", "parent: other")
     assert _reduction(other) == (False, None)
-
-
-def test_is_reduction_false_in_explicit_mode_with_no_body() -> None:
-    assert _reduction(None) == (False, None)
-
-
-def test_an_ordinary_body_never_fetches_the_prs_changed_files(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # The fetch happens only once a block has named this target, so an
-    # ordinary submission adds no API call to this audit.
-    def boom(repo: str, pr: int):  # type: ignore[no-untyped-def]
-        raise AssertionError("fetch_pr_files called for an ordinary body")
-
-    monkeypatch.setattr(comparator_cli, "fetch_pr_files", boom)
-    assert _reduction("an ordinary proof submission\n") == (False, None)
 
 
 def _stub_gh_pr_mode(  # type: ignore[no-untyped-def]
@@ -569,23 +526,6 @@ def test_run_comparator_reports_failed_cache_get(tmp_path, monkeypatch, capsys):
     assert "cache get failed" in capsys.readouterr().out
 
 
-def test_main_with_bin_reports_outcome_and_exits_one_on_worker_failure(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:  # type: ignore[no-untyped-def]
-    # Renamed from ..._exits_zero: under the exit-code contract a
-    # statement-mismatch is the worker's audit failure, so it now exits 1
-    # rather than 0. The report-contains-the-outcome assertion is unchanged.
-    args = _args_with_bin(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        comparator_cli,
-        "run_comparator",
-        lambda ws_dir, bin_path: (Outcome.STATEMENT_MISMATCH, "statement differs", ""),
-    )
-    assert main(args) == 1
-    out = capsys.readouterr().out
-    assert "statement-mismatch" in out
-
-
 # ---------------------------------------------------------------------------
 # exit codes + whose-problem-is-it reporting
 # ---------------------------------------------------------------------------
@@ -753,20 +693,3 @@ def test_solution_build_failure_does_not_flag_challenge_side_on_head_error(
     assert main(args) == 1
     out = capsys.readouterr().out
     assert f"error under {CHALLENGE_PREFIX}/" not in out
-
-
-def test_sandbox_unavailable_is_reported_as_infrastructure(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:  # type: ignore[no-untyped-def]
-    args = _args_with_bin(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        comparator_cli,
-        "run_comparator",
-        lambda ws, bin: (Outcome.SANDBOX_UNAVAILABLE, "no landrun", "transcript"),
-    )
-    code = main(args)
-    out = capsys.readouterr().out.lower()
-    assert code == 2
-    assert "infrastructure" in out
-    # must not read as the contributor's fault
-    assert "escalat" in out

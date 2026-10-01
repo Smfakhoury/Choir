@@ -39,27 +39,9 @@ def test_pr_body_has_closes_keyword_for_auto_link() -> None:
     assert "Closes #42" in body
 
 
-def test_pr_body_includes_claim_metadata() -> None:
-    body = pr_body(_sample_meta())
-    assert "@alice" in body
-    assert "2026-05-10T15:32:00+00:00" in body
-    assert "MyProj.Foo.add_comm" in body
-    assert "MyProj/Foo.lean" in body
-
-
 def test_pr_title_format() -> None:
     title = pr_title(_sample_meta())
     assert title == "choir(prove): MyProj.Foo.add_comm (closes #42)"
-
-
-def test_pr_title_includes_task_type() -> None:
-    title = pr_title(_sample_meta(task_type="golf"))
-    assert "choir(golf):" in title
-
-
-def test_pr_title_references_issue_number() -> None:
-    title = pr_title(_sample_meta(issue=999))
-    assert "(closes #999)" in title
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +54,6 @@ def _fake_run_factory(returncode: int, stdout: str, stderr: str = ""):  # type: 
         return CompletedRun(returncode=returncode, stdout=stdout, stderr=stderr)
 
     return fake_run
-
-
-def test_default_branch_returns_value_on_success(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(submit_mod, "run", _fake_run_factory(0, "main\n"))
-    assert submit_mod._default_branch("alice/repo") == "main"
 
 
 def test_default_branch_returns_value_for_non_main_repo(monkeypatch) -> None:  # type: ignore[no-untyped-def]

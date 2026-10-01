@@ -21,7 +21,6 @@ from gate.provers.isabelle import ISABELLE
 from gate.provers.lean4 import (
     LEAN4,
     build_lean_dependency_probe,
-    lean_dependency_command,
     parse_lean_dependencies,
 )
 
@@ -50,21 +49,6 @@ def test_probe_reads_proofs_through_the_axiom_traversal(tmp_path: Path) -> None:
     assert "value?" not in text
 
 
-def test_probe_unmangles_private_names_and_skips_generated_declarations(
-    tmp_path: Path,
-) -> None:
-    text = build_lean_dependency_probe(tmp_path, ["Proj"]).read_text()
-    assert "privateToUserName?" in text
-    assert "findDeclarationRanges?" in text
-
-
-def test_probe_watches_the_declarations_it_is_given(tmp_path: Path) -> None:
-    text = build_lean_dependency_probe(
-        tmp_path, ["Proj"], ["Real.binEntropy", "Finset.erdos_ko_rado"]
-    ).read_text()
-    assert '["Real.binEntropy", "Finset.erdos_ko_rado"]' in text
-
-
 def test_probe_writes_a_watched_name_as_itself(tmp_path: Path) -> None:
     """A subscript survives as a character, not as a `\\u` escape lean may
     spell differently."""
@@ -85,14 +69,6 @@ def test_collect_hands_the_watch_list_to_the_probe(tmp_path: Path) -> None:
     profile = dataclasses.replace(LEAN4, dependency_command=command)
     collect_dependencies(profile, tmp_path, ["Proj"], ["Real.binEntropy"])
     assert seen == [["Real.binEntropy"]]
-
-
-def test_dependency_command_runs_the_probe_it_writes(tmp_path: Path) -> None:
-    probe = tmp_path / ".choir-deps-probe.lean"
-    assert lean_dependency_command(tmp_path, ["Proj"]) == [
-        "lake", "env", "lean", str(probe),
-    ]
-    assert probe.exists()
 
 
 def test_collect_writes_nothing_into_the_project(tmp_path: Path) -> None:

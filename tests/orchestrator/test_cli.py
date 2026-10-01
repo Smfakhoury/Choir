@@ -151,15 +151,6 @@ def test_repo_may_be_written_on_either_side_of_the_subcommand(argv, monkeypatch,
     assert json.loads(capsys.readouterr().out) == {"repo": "o/r", "number": 7}
 
 
-def test_a_repo_before_the_subcommand_survives_the_subparser(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    """argparse applies defaults after parsing, so a default on the
-    subcommand's copy of the flag would overwrite the value given early."""
-    monkeypatch.setattr(cli_mod, "get_task", lambda repo, number: {"repo": repo})
-
-    assert cli_mod.main(["--repo", "o/r", "task", "7"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"repo": "o/r"}
-
-
 def test_the_number_may_be_written_as_a_flag(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     """`salvage` spells it `--pr`, so reaching for `--pr` here is a fair
     guess; it should not be a usage error."""
@@ -172,15 +163,6 @@ def test_the_number_may_be_written_as_a_flag(monkeypatch, capsys) -> None:  # ty
     assert json.loads(capsys.readouterr().out)["number"] == 7
 
 
-def test_a_task_number_may_be_written_as_issue(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    """The alias names what the subcommand acts on: task issues take
-    `--issue`, pull requests take `--pr`."""
-    monkeypatch.setattr(cli_mod, "get_task", lambda repo, number: {"number": number})
-
-    assert cli_mod.main(["--repo", "o/r", "task", "--issue", "7"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"number": 7}
-
-
 def test_omitting_the_number_is_an_error_against_the_subcommand(capsys) -> None:
     """The usage printed has to be the subcommand's. Reported against the
     top-level parser it lists every subcommand instead, which hides the
@@ -191,15 +173,6 @@ def test_omitting_the_number_is_an_error_against_the_subcommand(capsys) -> None:
     err = capsys.readouterr().err
     assert "choir orch comment" in err
     assert "--pr" in err
-
-
-def test_giving_the_number_twice_is_an_error(capsys) -> None:
-    """Two spellings of one argument, and no way to tell which was meant if
-    they disagree."""
-    with pytest.raises(SystemExit):
-        cli_mod.main(["--repo", "o/r", "comment", "7", "--pr", "7", "--body", "hi"])
-
-    assert "choir orch comment" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("argv", [

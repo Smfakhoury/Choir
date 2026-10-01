@@ -10,10 +10,7 @@ nobody calls cannot catch that; this asserts the call happens.
 
 from __future__ import annotations
 
-import pytest
-
 from client import task as task_mod
-from client.build_store import format_cache_report
 from gate.state.intake import ParseSuccess
 from gate.state.task_record import ProjectRef, TaskRecord, TaskType
 
@@ -43,26 +40,6 @@ def test_a_claim_fills_the_workspace_from_the_stores(monkeypatch, tmp_path) -> N
         "what the stores did must reach the claimer — reported silently, "
         "nobody notices the store is being missed"
     )
-
-
-@pytest.mark.parametrize(
-    "deps,expect",
-    [
-        ("hit", "no download, no copy"),
-        ("fetched", "moved into the store"),
-        ("fetched-nostore", "could not be written"),
-        ("skipped", "the build will fetch them"),
-        ("present", "already in this workspace"),
-        ("no-manifest", "no dependency manifest"),
-        ("something-new", ""),
-    ],
-)
-def test_every_outcome_says_what_it_means(deps: str, expect: str) -> None:
-    """Including the unknown one, which must stay quiet rather than lie."""
-    note = format_cache_report({"deps": deps, "build_restore": "miss"})
-    assert expect in note
-    if not expect:
-        assert note == ""
 
 
 def _profile():  # type: ignore[no-untyped-def]

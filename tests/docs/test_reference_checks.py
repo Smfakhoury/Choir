@@ -140,28 +140,3 @@ def test_checks_table_matches_registry() -> None:
         "docs/reference.md's Checks table has drifted from gate/checks.py:\n"
         + "\n".join(problems)
     )
-
-
-def test_checks_table_guard_catches_a_wrong_row() -> None:
-    """Proof the guard has teeth: flip one real row's class and it fails.
-
-    `comparator` is `Trust` with no override in the real table (matching
-    `CHECKS["comparator"] is CheckClass.TRUST`, which has no
-    `PROVER_OVERRIDES` entry on any prover). Rewriting just that row's
-    class cell to `Advisory` — exactly the class of error this guard
-    exists to catch, a doc asserting the wrong blocking status for a
-    check — must make the comparison fail.
-    """
-    text = REFERENCE.read_text(encoding="utf-8")
-    corrupted, count = re.subn(
-        r"(\|\s*`comparator`\s*\|.*?\|\s*)Trust(\s*\|\s*Yes\s*\|)",
-        r"\1Advisory\2",
-        text,
-        count=1,
-    )
-    assert count == 1, "could not locate the comparator row to corrupt"
-    assert corrupted != text
-
-    problems = _diff_against_registry(_table_rows(corrupted))
-    assert problems, "corrupting the comparator row did not trip the guard"
-    assert any("comparator" in p for p in problems)

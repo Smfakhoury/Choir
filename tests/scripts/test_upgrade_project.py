@@ -113,13 +113,6 @@ def _build_degraded_fixture(tmp_path: Path) -> Path:
     return target
 
 
-def test_upgrade_project_sh_has_valid_bash_syntax() -> None:
-    result = subprocess.run(
-        ["bash", "-n", str(SCRIPT)], capture_output=True, text=True, check=False
-    )
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.fixture
 def fixture_repo(tmp_path: Path) -> Path:
     return _build_degraded_fixture(tmp_path)

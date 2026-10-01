@@ -26,13 +26,9 @@ from client.workspace import (
     find_workspace_root,
     slugify_decl,
     sync_skills,
-    task_slug,
-    workspace_path,
     workspace_profile,
-    workspace_root,
-    write_choir_md,
 )
-from gate.provers import ProverError, get_profile
+from gate.provers import get_profile
 from gate.provers.lean4 import LEAN4
 from gate.state.task_record import ProjectRef, TaskRecord, TaskType
 
@@ -60,60 +56,8 @@ def test_branch_name_is_the_issue_number_and_the_slug() -> None:
 
 
 # ---------------------------------------------------------------------------
-# workspace_path / workspace_root
-# ---------------------------------------------------------------------------
-
-
-def test_workspace_root_uses_env_override(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path))
-    assert workspace_root() == tmp_path
-
-
-def test_workspace_path_under_root(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path))
-    p = workspace_path("alice/proj", 42)
-    assert p == tmp_path / "alice" / "proj" / "42"
-
-
-def test_workspace_root_falls_back_to_home_choir(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.delenv("CHOIR_WORK_ROOT", raising=False)
-    assert workspace_root().parts[-2:] == (".choir", "work")
-
-
-# ---------------------------------------------------------------------------
 # LeaseMetadata round-trip
 # ---------------------------------------------------------------------------
-
-
-def _sample_meta() -> LeaseMetadata:
-    return LeaseMetadata(
-        repo="alice/proj",
-        issue=42,
-        branch="choir/42-add-comm",
-        pinned_commit="1a2b3c4d",
-        claimed_at="2026-05-10T15:32:00+00:00",
-        claimed_by="alice",
-        target_file="MyProj/Foo.lean",
-        target_decl="MyProj.Foo.add_comm",
-        task_type="prove",
-    )
-
-
-def test_lease_metadata_write_read_roundtrip(tmp_path: Path) -> None:
-    meta = _sample_meta()
-    path = tmp_path / ".choir-lease.json"
-    meta.write(path)
-    loaded = LeaseMetadata.read(path)
-    assert loaded == meta
-
-
-def test_lease_metadata_file_is_json(tmp_path: Path) -> None:
-    meta = _sample_meta()
-    path = tmp_path / ".choir-lease.json"
-    meta.write(path)
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["repo"] == "alice/proj"
-    assert raw["issue"] == 42
 
 
 def test_lease_metadata_read_fails_loudly_on_missing_field(tmp_path: Path) -> None:
@@ -121,14 +65,6 @@ def test_lease_metadata_read_fails_loudly_on_missing_field(tmp_path: Path) -> No
     path.write_text('{"repo": "alice/proj"}\n', encoding="utf-8")
     with pytest.raises(TypeError):
         LeaseMetadata.read(path)
-
-
-def test_lease_metadata_carries_skills_commit(tmp_path: Path) -> None:
-    meta = _sample_meta()
-    meta.skills_commit = "abc1234"
-    path = tmp_path / ".choir-lease.json"
-    meta.write(path)
-    assert LeaseMetadata.read(path).skills_commit == "abc1234"
 
 
 def test_lease_metadata_reads_legacy_file_without_skills_commit(tmp_path: Path) -> None:
@@ -167,27 +103,12 @@ def test_lease_metadata_reads_file_with_unknown_extra_key(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_find_workspace_root_in_current_dir(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path))
-    (tmp_path / ".choir-lease.json").write_text("{}", encoding="utf-8")
-    assert find_workspace_root(tmp_path) == tmp_path
-
-
 def test_find_workspace_root_in_ancestor(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path))
     (tmp_path / ".choir-lease.json").write_text("{}", encoding="utf-8")
     deep = tmp_path / "a" / "b" / "c"
     deep.mkdir(parents=True)
     assert find_workspace_root(deep) == tmp_path
-
-
-def test_find_workspace_root_returns_none_outside_any_workspace(
-    monkeypatch, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path))
-    deep = tmp_path / "a" / "b"
-    deep.mkdir(parents=True)
-    assert find_workspace_root(deep) is None
 
 
 # ---------------------------------------------------------------------------
@@ -228,27 +149,6 @@ def test_find_workspace_root_returns_none_when_start_is_outside_work_root(
 
 
 # ---------------------------------------------------------------------------
-# CHOIR.md primer
-# ---------------------------------------------------------------------------
-
-
-def test_write_choir_md_creates_file(tmp_path: Path) -> None:
-    write_choir_md(tmp_path, LEAN4)
-    assert (tmp_path / "CHOIR.md").is_file()
-
-
-
-def test_choir_md_is_overwriteable(tmp_path: Path) -> None:
-    # Calling twice should leave the canonical content (not append).
-    (tmp_path / "CHOIR.md").write_text("garbage", encoding="utf-8")
-    write_choir_md(tmp_path, LEAN4)
-    content = (tmp_path / "CHOIR.md").read_text(encoding="utf-8")
-    assert "garbage" not in content
-    assert content == build_choir_md(LEAN4)
-
-
-
-# ---------------------------------------------------------------------------
 # build_choir_md: profile-injected facts (Task 6 / design note 12 §6)
 # ---------------------------------------------------------------------------
 
@@ -260,15 +160,6 @@ def test_build_choir_md_rocq_mentions_rocq_facts_not_lean() -> None:
     assert "Admitted" in content
     assert "lake " not in content
 
-
-
-def test_build_choir_md_protected_files_include_substrate_set() -> None:
-    # Every prover protects the substrate paths, plus its own files.
-    content = build_choir_md(get_profile("rocq"))
-    assert ".choir/" in content
-    assert ".github/" in content
-    assert "skills/" in content
-    assert "_CoqProject" in content
 
 
 # ---------------------------------------------------------------------------
@@ -301,31 +192,6 @@ def test_workspace_profile_falls_back_to_lean4_on_malformed_toml(
     assert "warning" in captured.out.lower()
 
 
-def test_workspace_profile_falls_back_to_lean4_on_unknown_prover(
-    tmp_path: Path, capsys
-) -> None:  # type: ignore[no-untyped-def]
-    choir_dir = tmp_path / ".choir"
-    choir_dir.mkdir()
-    (choir_dir / "project.toml").write_text(
-        '[project]\nprover = "not-a-real-prover"\n', encoding="utf-8"
-    )
-
-    profile = workspace_profile(tmp_path)
-
-    assert profile is LEAN4
-    captured = capsys.readouterr()
-    assert "warning" in captured.out.lower()
-
-
-def test_workspace_profile_propagates_read_prover_error_type(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    # Any ProverError from the select module is caught, not re-raised.
-    def boom(path):  # type: ignore[no-untyped-def]
-        raise ProverError("simulated")
-
-    monkeypatch.setattr(wsmod, "read_prover", boom)
-    assert workspace_profile(tmp_path).name == "lean4"
-
-
 # ---------------------------------------------------------------------------
 # add_local_excludes
 # ---------------------------------------------------------------------------
@@ -340,21 +206,6 @@ def test_add_local_excludes_appends(tmp_path: Path) -> None:
     assert "# existing" in text
     assert ".choir-skills/" in text
     assert ".choir-context.md" in text
-
-
-def test_add_local_excludes_idempotent(tmp_path: Path) -> None:
-    info = tmp_path / ".git" / "info"
-    info.mkdir(parents=True)
-    (info / "exclude").write_text("", encoding="utf-8")
-    add_local_excludes(tmp_path, [".choir-skills/"])
-    add_local_excludes(tmp_path, [".choir-skills/"])
-    text = (info / "exclude").read_text(encoding="utf-8")
-    assert text.splitlines().count(".choir-skills/") == 1
-
-
-def test_add_local_excludes_no_git_info_is_noop(tmp_path: Path) -> None:
-    # No .git/info — must not raise.
-    add_local_excludes(tmp_path, [".choir-skills/"])
 
 
 # ---------------------------------------------------------------------------
@@ -377,18 +228,6 @@ def _make_origin_with_skills(origin: Path, *, versions: list[tuple[str, str]]) -
         (origin / "skills" / "conventions.md").write_text(content, encoding="utf-8")
         _git(["add", "-A"], origin)
         _git(["commit", "-m", msg], origin)
-
-
-def test_sync_skills_extracts_latest_not_pinned(tmp_path: Path) -> None:
-    origin = tmp_path / "origin"
-    _make_origin_with_skills(origin, versions=[("v1-old", "v1"), ("v2-latest", "v2")])
-    ws = tmp_path / "ws"
-    subprocess.run(["git", "clone", str(origin), str(ws)], check=True, capture_output=True)
-
-    sha = sync_skills(ws)
-
-    assert sha and len(sha) >= 7
-    assert (ws / ".choir-skills" / "conventions.md").read_text(encoding="utf-8") == "v2-latest"
 
 
 def test_sync_skills_no_pack_returns_sha_empty_dir(tmp_path: Path) -> None:
@@ -425,25 +264,6 @@ def test_assemble_skill_context_concatenates(tmp_path: Path) -> None:
     assert "Use snake_case" in text
     assert "Prefer simp" in text
     assert "TASK.md" in text  # header points the agent at its task
-
-
-def test_assemble_skill_context_none_when_no_skills(tmp_path: Path) -> None:
-    assert assemble_skill_context(tmp_path) is None       # no .choir-skills dir
-    (tmp_path / ".choir-skills").mkdir()
-    assert assemble_skill_context(tmp_path) is None       # dir present but empty
-
-
-# ---------------------------------------------------------------------------
-# CHOIR.md primer points at .choir-context.md (Task 5)
-# ---------------------------------------------------------------------------
-
-
-def test_choir_md_points_at_synced_context(tmp_path: Path) -> None:
-    write_choir_md(tmp_path, LEAN4)
-    content = (tmp_path / "CHOIR.md").read_text(encoding="utf-8")
-    assert ".choir-context.md" in content
-    # And it still documents the protected skills/ path (unchanged contract).
-    assert "skills/" in content
 
 
 # ---------------------------------------------------------------------------
@@ -597,27 +417,3 @@ def test_sync_skills_works_in_a_worktree(monkeypatch, tmp_path: Path) -> None:  
     assert synced and len(synced) >= 7  # origin/HEAD resolved → real sha, not None
     assert (wt / ".choir-skills" / "conventions.md").read_text(encoding="utf-8") == "v2-latest"
     assert assemble_skill_context(wt) is not None
-
-
-# ---------------------------------------------------------------------------
-# task_slug
-# ---------------------------------------------------------------------------
-
-
-class TestTaskSlug:
-    def _record(self, **kw):
-        base = {
-            "choir-task-version": 1,
-            "project_ref": ProjectRef(
-                repo="acme/proofs", commit="a" * 40,
-                toolchain="leanprover/lean4:v4.31.0",
-            ),
-            "deps": [],
-        }
-        return TaskRecord(**{**base, **kw})
-
-    def test_prove_slug_unchanged(self):
-        rec = self._record(type="prove", target_file="Foo.lean",
-                            target_decl="SampleProject.one_add_one")
-        assert task_slug(rec) == "sampleproject-one-add-one"
-

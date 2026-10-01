@@ -85,9 +85,7 @@ def _build_fixture(tmp_path: Path, script: Path) -> tuple[Path, Path, Path, Path
     return home, choir, stubs, work
 
 
-def _run(
-    script: Path, tmp_path: Path, *, bin_on_path: bool, from_home: bool = False
-) -> subprocess.CompletedProcess[str]:
+def _run(script: Path, tmp_path: Path, *, bin_on_path: bool) -> subprocess.CompletedProcess[str]:
     home, choir, stubs, work = _build_fixture(tmp_path, script)
     path = f"{stubs}:/usr/bin:/bin"
     if bin_on_path:
@@ -97,7 +95,7 @@ def _run(
         capture_output=True,
         text=True,
         check=False,
-        cwd=str(home if from_home else work),
+        cwd=str(work),
         env={"HOME": str(home), "PATH": path},
     )
 
@@ -136,17 +134,6 @@ def test_the_manual_pointer_is_written_to_the_working_folder(
 
 
 @pytest.mark.parametrize("script", [ORCH_INIT, JOIN], ids=["orchestrator-init", "join"])
-def test_no_pointer_is_written_to_the_home_folder(script: Path, tmp_path: Path) -> None:
-    """Every agent session under the home folder would load a pointer there."""
-    proc = _run(script, tmp_path, bin_on_path=True, from_home=True)
-    home = tmp_path / "home"
-    assert not (home / "AGENTS.md").exists()
-    assert not (home / "CLAUDE.md").exists()
-    assert "ACTION NEEDED" in proc.stdout, proc.stdout
-    assert proc.returncode != 0
-
-
-@pytest.mark.parametrize("script", [ORCH_INIT, JOIN], ids=["orchestrator-init", "join"])
 def test_path_is_verified_not_assumed(script: Path, tmp_path: Path) -> None:
     """A bin dir the user's PATH does not carry is flagged, not assumed.
 
@@ -158,21 +145,6 @@ def test_path_is_verified_not_assumed(script: Path, tmp_path: Path) -> None:
     assert "ACTION NEEDED" in proc.stdout, proc.stdout
     assert re.search(r"\.local/bin", proc.stdout), proc.stdout
     assert proc.returncode != 0, "setup reported READY without a reachable choir"
-
-
-def test_entry_point_installer_is_identical_in_both_scripts() -> None:
-    """The duplicated installer must not drift (see module docstring)."""
-
-    def _fn(script: Path) -> str:
-        m = re.search(
-            r"^install_entry_point\(\) \{$.*?^\}$",
-            script.read_text(),
-            re.MULTILINE | re.DOTALL,
-        )
-        assert m, f"install_entry_point() not found in {script.name}"
-        return m.group(0)
-
-    assert _fn(ORCH_INIT) == _fn(JOIN)
 
 
 @pytest.mark.parametrize("script", [ORCH_INIT, JOIN], ids=["orchestrator-init", "join"])

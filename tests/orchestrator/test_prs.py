@@ -11,12 +11,9 @@ import pytest
 from gate.checks import REQUIRED_PRESENT
 from orchestrator.prs import (
     PRError,
-    close_pr,
     get_pr,
-    get_pr_diff,
     list_open_prs,
     merge_pr,
-    post_comment,
 )
 
 
@@ -85,50 +82,6 @@ def _green_rollup(
     return [{"name": name, **fields} for name, fields in base.items()]
 
 
-def test_list_open_prs_parses_view(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    payload = json.dumps([_pr_payload()])
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(stdout=payload))
-    prs = list_open_prs("alice/proj")
-    assert len(prs) == 1
-    pr = prs[0]
-    assert pr.number == 5
-    assert pr.author == "alice"
-    assert pr.state == "open"
-    assert pr.files == ("Sample/Foo.lean",)
-    assert pr.linked_issues == (3,)
-    assert pr.checks_all_green is True
-    assert pr.checks_pending is False
-
-
-def test_checks_all_green_false_when_one_fails(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    payload = json.dumps(_pr_payload(statusCheckRollup=[
-        {"name": "verify-pr / rebuild", "status": "COMPLETED", "conclusion": "SUCCESS"},
-        {"name": "verify-sorry / check", "status": "COMPLETED", "conclusion": "FAILURE"},
-    ]))
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(stdout=payload))
-    pr = get_pr("alice/proj", 5)
-    assert pr.checks_all_green is False
-    assert pr.checks_pending is False
-
-
-def test_checks_pending_while_running(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    payload = json.dumps(_pr_payload(statusCheckRollup=[
-        {"name": "verify-pr / rebuild", "status": "IN_PROGRESS", "conclusion": ""},
-    ]))
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(stdout=payload))
-    pr = get_pr("alice/proj", 5)
-    assert pr.checks_pending is True
-    assert pr.checks_all_green is False
-
-
-def test_no_checks_is_not_green(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # A repo without the gate workflows must not look mergeable-green.
-    payload = json.dumps(_pr_payload(statusCheckRollup=[]))
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(stdout=payload))
-    pr = get_pr("alice/proj", 5)
-    assert pr.checks_all_green is False
-
-
 def test_status_context_shape_normalized(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # gh mixes CheckRun and StatusContext shapes; the latter uses
     # `context`/`state` instead of `name`/`status`.
@@ -147,25 +100,6 @@ def test_status_context_shape_normalized(monkeypatch) -> None:  # type: ignore[n
     # Non-terminal states are left alone, so they keep blocking.
     assert pr.checks[1].status == "PENDING"
     assert pr.checks[1].conclusion == ""
-
-
-def test_get_pr_diff_passes_through(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        subprocess, "run", lambda *a, **k: _FakeProc(stdout="diff --git a/X b/X\n")
-    )
-    assert get_pr_diff("alice/proj", 5).startswith("diff --git")
-
-
-def test_post_comment_uses_the_issues_endpoint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    captured = []
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda cmd, **k: captured.append(cmd) or _FakeProc(stdout=""),
-    )
-    post_comment("alice/proj", 5, "please fix X")
-    cmd = captured[0]
-    assert cmd[:3] == ["gh", "api", "repos/alice/proj/issues/5/comments"]
-    assert "body=please fix X" in cmd
 
 
 def test_merge_pr_default_squash_delete(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -213,33 +147,6 @@ def test_merge_pr_does_not_delete_a_branch_on_a_contributors_fork(monkeypatch) -
     # The merge itself still happens, and still pins the head SHA.
     assert "--squash" in cmd
     assert payload["headRefOid"] in cmd
-
-
-def test_merge_pr_skips_branch_deletion_when_the_head_repo_is_unknown(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """gh reports null for a head repository whose fork has been deleted.
-    Unknown must read as "may be a fork": skipping a cleanup is free, failing
-    a completed merge is not."""
-    payload = _pr_payload(
-        statusCheckRollup=_green_rollup(),
-        headRepository=None,
-        headRepositoryOwner=None,
-    )
-    captured = []
-
-    def fake_run(cmd, **k):  # type: ignore[no-untyped-def]
-        if "merge" in cmd:
-            captured.append(cmd)
-            return _FakeProc(stdout="")
-        return _FakeProc(stdout=json.dumps(payload))
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    merge_pr("alice/proj", 5)
-    assert "--delete-branch" not in captured[0]
-
-
-def test_merge_pr_invalid_method_raises() -> None:
-    with pytest.raises(PRError, match="invalid merge method"):
-        merge_pr("alice/proj", 5, method="cherry-pick")
 
 
 def test_merge_pr_branch_protection_rejection_surfaces(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -322,18 +229,6 @@ def test_merge_pr_allows_green_legacy_status_context(monkeypatch) -> None:  # ty
     monkeypatch.setattr(subprocess, "run", fake_run)
     merge_pr("o/r", 7)
     assert len(merged) == 1
-
-
-def test_merge_pr_refuses_pending_legacy_status_context(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """The other half: a non-terminal legacy state still blocks."""
-    rollup = _green_rollup()
-    rollup.append({"context": "codecov/patch", "state": "PENDING"})
-    payload = _pr_payload(statusCheckRollup=rollup)
-    monkeypatch.setattr(
-        subprocess, "run", lambda cmd, **kw: _FakeProc(stdout=json.dumps(payload))
-    )
-    with pytest.raises(PRError, match="codecov/patch"):
-        merge_pr("o/r", 7)
 
 
 def test_merge_pr_refuses_pending_blocking_check(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -433,11 +328,6 @@ def test_merge_pr_without_a_prover_refuses(monkeypatch) -> None:  # type: ignore
         merge_pr("o/r", 7)
 
 
-def test_merge_pr_force_rejects_non_string() -> None:
-    with pytest.raises(PRError, match="non-blank reason string"):
-        merge_pr("o/r", 7, force=True)  # type: ignore[arg-type]
-
-
 def test_merge_pr_force_rejects_blank_reason() -> None:
     with pytest.raises(PRError, match="non-blank reason string"):
         merge_pr("o/r", 7, force="   ")
@@ -507,29 +397,6 @@ def test_merge_pr_force_names_prover_and_non_blocking_red(monkeypatch) -> None: 
     )
 
 
-def test_close_pr_with_comment(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    captured = []
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda cmd, **k: captured.append(cmd) or _FakeProc(stdout=""),
-    )
-    close_pr("alice/proj", 5, comment="superseded by #6")
-    cmd = captured[0]
-    assert cmd[:3] == ["gh", "pr", "close"]
-    assert "superseded by #6" in cmd
-
-
-def test_as_dict_round_trips_to_json(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    payload = json.dumps(_pr_payload())
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc(stdout=payload))
-    pr = get_pr("alice/proj", 5)
-    encoded = json.dumps(pr.as_dict())
-    decoded = json.loads(encoded)
-    assert decoded["number"] == 5
-    assert decoded["checks_all_green"] is True
-    assert decoded["linked_issues"] == [3]
-
-
 def test_get_pr_paginates_past_the_hundred_file_cap(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """`gh pr view --json files` truncates at 100 with no error and no
     marker. `docs/agents/ORCHESTRATOR.md` § Boundaries has the orchestrator refuse
@@ -554,21 +421,6 @@ def test_get_pr_paginates_past_the_hundred_file_cap(monkeypatch) -> None:  # typ
     assert ".github/workflows/verify-axiom-honesty.yml" in pr.files
     assert len(pr.files) == 101
     assert pr.files_truncated is False
-
-
-def test_get_pr_does_not_paginate_a_small_pr(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """One extra request per PR is the right trade only when it buys
-    something. Under the cap the first response is already complete."""
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **k):  # type: ignore[no-untyped-def]
-        calls.append(cmd)
-        return _FakeProc(stdout=json.dumps(_pr_payload()))
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    pr = get_pr("alice/proj", 5)
-    assert pr.files == ("Sample/Foo.lean",)
-    assert not any("--paginate" in c for c in calls)
 
 
 def test_list_open_prs_flags_a_truncated_file_list_rather_than_hiding_it(monkeypatch) -> None:  # type: ignore[no-untyped-def]

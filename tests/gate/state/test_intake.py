@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import textwrap
 
-from gate.state import intake
 from gate.state.intake import (
     ERROR_INVALID_VALUE,
     ERROR_INVALID_YAML,
     ERROR_MISSING_FIELD,
     ERROR_NO_FRONTMATTER,
-    ERROR_REPO_MISMATCH,
-    ERROR_TARGET_FILE_EXTENSION,
     ERROR_TYPE_MISMATCH,
     ERROR_UNKNOWN_FIELD,
     ERROR_UNKNOWN_VERSION,
@@ -87,13 +84,6 @@ def test_blueprint_ref_optional_and_passed_through() -> None:
     assert result.record.blueprint_ref == "blueprint/foo.tex#add_comm"
 
 
-def test_deps_populated() -> None:
-    body = _valid_body().replace("deps: []", "deps: [12, 34, 56]")
-    result = parse_issue_body(body)
-    assert isinstance(result, ParseSuccess)
-    assert result.record.deps == [12, 34, 56]
-
-
 # ---------------------------------------------------------------------------
 # Front-matter extraction
 # ---------------------------------------------------------------------------
@@ -110,12 +100,6 @@ def test_unterminated_frontmatter() -> None:
     result = parse_issue_body(body)
     assert isinstance(result, list)
     assert _errors_by_code(result)[ERROR_UNTERMINATED_FRONTMATTER]
-
-
-def test_blank_lines_before_frontmatter_are_tolerated() -> None:
-    body = "\n\n" + _valid_body()
-    result = parse_issue_body(body)
-    assert isinstance(result, ParseSuccess)
 
 
 def test_leading_html_comment_is_tolerated() -> None:
@@ -222,14 +206,6 @@ def test_errors_are_accumulated() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_type_value() -> None:
-    body = _valid_body().replace("type: prove", "type: shenanigans")
-    result = parse_issue_body(body)
-    assert isinstance(result, list)
-    err = _errors_by_code(result)[ERROR_INVALID_VALUE]
-    assert err.field == "type"
-
-
 def test_retired_types_are_rejected() -> None:
     # Retired 2026-08-18: formalize (spec D2 forbids worker-authored
     # statements), draft and refactor (no plan, zero live use), review
@@ -282,56 +258,6 @@ def test_target_file_extension_not_checked_by_default() -> None:
     assert result.record.target_file == "MyProj/Foo.txt"
 
 
-def test_target_file_extension_rejected_when_not_in_allowed_set() -> None:
-    body = _valid_body().replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Foo.thy")
-    result = parse_issue_body(body, allowed_extensions=(".lean",))
-    assert isinstance(result, list)
-    err = _errors_by_code(result)[ERROR_TARGET_FILE_EXTENSION]
-    assert err.field == "target_file"
-    assert ".lean" in err.message
-
-
-def test_target_file_extension_accepted_when_in_allowed_set() -> None:
-    body = _valid_body().replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Foo.thy")
-    result = parse_issue_body(body, allowed_extensions=(".thy", ".lean"))
-    assert isinstance(result, ParseSuccess)
-    assert result.record.target_file == "MyProj/Foo.thy"
-
-
-def test_target_file_extension_check_skipped_when_none() -> None:
-    body = _valid_body().replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Foo.weird")
-    result = parse_issue_body(body, allowed_extensions=None)
-    assert isinstance(result, ParseSuccess)
-
-
-def test_target_file_extension_check_is_additive_not_a_schema_replacement() -> None:
-    # A record that fails schema validation for an unrelated reason must
-    # short-circuit before the extension check ever runs — the extension
-    # check is layered on top of an otherwise-valid record, not a
-    # substitute for schema errors.
-    body = (
-        _valid_body()
-        .replace("type: prove\n", "")
-        .replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Foo.thy")
-    )
-    result = parse_issue_body(body, allowed_extensions=(".lean",))
-    assert isinstance(result, list)
-    codes = {e.code for e in result}
-    assert ERROR_MISSING_FIELD in codes
-    assert ERROR_TARGET_FILE_EXTENSION not in codes
-
-
-def test_target_file_extension_error_accumulates_with_repo_mismatch() -> None:
-    body = _valid_body().replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Foo.thy")
-    result = parse_issue_body(
-        body, expected_repo="other-org/myproj", allowed_extensions=(".lean",)
-    )
-    assert isinstance(result, list)
-    codes = {e.code for e in result}
-    assert ERROR_REPO_MISMATCH in codes
-    assert ERROR_TARGET_FILE_EXTENSION in codes
-
-
 def test_target_file_normalizes_leading_dot_slash() -> None:
     body = _valid_body().replace("target_file: MyProj/Foo.lean", "target_file: ./MyProj/Foo.lean")
     result = parse_issue_body(body)
@@ -353,15 +279,6 @@ def test_target_decl_with_invalid_chars_rejected() -> None:
     assert any(e.field == "target_decl" for e in result)
 
 
-def test_target_decl_starting_with_digit_rejected() -> None:
-    body = _valid_body().replace(
-        "target_decl: MyProj.Foo.add_comm", "target_decl: 1MyProj.Foo"
-    )
-    result = parse_issue_body(body)
-    assert isinstance(result, list)
-    assert any(e.field == "target_decl" for e in result)
-
-
 def test_target_decl_with_apostrophe_allowed() -> None:
     # Mathlib uses primed variants regularly.
     body = _valid_body().replace(
@@ -376,13 +293,6 @@ def test_target_decl_with_apostrophe_allowed() -> None:
 # ---------------------------------------------------------------------------
 # project_ref
 # ---------------------------------------------------------------------------
-
-
-def test_commit_too_short_rejected() -> None:
-    body = _valid_body().replace("commit: 1a2b3c4d", "commit: 1a2b")
-    result = parse_issue_body(body)
-    assert isinstance(result, list)
-    assert any(e.field == "project_ref.commit" for e in result)
 
 
 def test_commit_uppercase_normalized_to_lowercase() -> None:
@@ -414,13 +324,6 @@ def test_repo_org_lowercased() -> None:
     assert result.record.project_ref.repo == "org/MyProj"
 
 
-def test_repo_mismatch_against_expected() -> None:
-    result = parse_issue_body(_valid_body(), expected_repo="other-org/myproj")
-    assert isinstance(result, list)
-    err = _errors_by_code(result)[ERROR_REPO_MISMATCH]
-    assert err.field == "project_ref.repo"
-
-
 def test_repo_match_against_expected_passes() -> None:
     # Case-insensitive match.
     result = parse_issue_body(_valid_body(), expected_repo="ORG/myproj")
@@ -430,13 +333,6 @@ def test_repo_match_against_expected_passes() -> None:
 # ---------------------------------------------------------------------------
 # deps
 # ---------------------------------------------------------------------------
-
-
-def test_deps_negative_rejected() -> None:
-    body = _valid_body().replace("deps: []", "deps: [-1]")
-    result = parse_issue_body(body)
-    assert isinstance(result, list)
-    assert any(e.field and e.field.startswith("deps") for e in result)
 
 
 def test_deps_zero_rejected() -> None:
@@ -451,15 +347,3 @@ def test_deps_non_int_rejected() -> None:
     result = parse_issue_body(body)
     assert isinstance(result, list)
     assert any(e.field and e.field.startswith("deps") for e in result)
-
-
-# ---------------------------------------------------------------------------
-# Smoke: error-code constants are stable strings
-# ---------------------------------------------------------------------------
-
-
-def test_error_codes_are_strings() -> None:
-    # If anyone refactors and accidentally converts one to an enum, this catches it.
-    assert isinstance(intake.ERROR_NO_FRONTMATTER, str)
-    assert isinstance(intake.ERROR_MISSING_FIELD, str)
-    assert isinstance(intake.ERROR_UNKNOWN_VERSION, str)

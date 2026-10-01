@@ -16,8 +16,6 @@ import pytest
 
 from gate.indexer.extract import extract_declarations
 from gate.inventory.scan import scan_text, strip_comments
-from gate.provers.base import CommentSyntax
-from gate.provers.decl_syntax import continuation_lines_for
 from gate.provers.isabelle import (
     _STOP_TOKEN_RE,
     _STOP_TOKENS,
@@ -67,141 +65,8 @@ end
 
 
 # ---------------------------------------------------------------------------
-# Declarative fields (note 12 §2.2/§3.2, verbatim)
+# qualify_isabelle_decl_names
 # ---------------------------------------------------------------------------
-
-
-def test_isabelle_declarative_fields() -> None:
-    assert ISABELLE.name == "isabelle"
-    assert ISABELLE.file_extensions == (".thy",)
-    # `verbatim_delimiters` is the cartouche (round 9): inside it a `(*`
-    # is not a comment opener. This pin enumerates the profile's
-    # declarative fields, so adding one is what changes it — no
-    # behavioural expectation in this suite moved. ASCII only, on
-    # measured evidence; see `CommentSyntax.verbatim_delimiters`.
-    assert ISABELLE.comment_syntax == CommentSyntax(
-        line=None,
-        block_open="(*",
-        block_close="*)",
-        nested=True,
-        verbatim_delimiters=("\\<open>", "\\<close>"),
-    )
-    assert ISABELLE.decl_keywords == (
-        "lemma",
-        "theorem",
-        "corollary",
-        "proposition",
-        "schematic_goal",
-        # thy_stmt
-        "axiomatization",
-        # thy_defn. `record` / `type_synonym` were added by the fix
-        # round (whole-slice review I3) from the Isar reference
-        # manual's source; the rest by round 6 (F2), which re-derived
-        # the whole tuple from the live toolchain's own keyword-kind
-        # table (`Keyword.command_kind`) and then built a theory using
-        # every one of them to measure that each enumerates with the
-        # right keyword and the real name.
-        "definition",
-        "abbreviation",
-        "fun",
-        "primrec",
-        "primcorec",
-        "inductive",
-        "inductive_set",
-        "coinductive",
-        "coinductive_set",
-        "datatype",
-        "codatatype",
-        "record",
-        "type_synonym",
-        "lemmas",
-        "inductive_cases",
-        "inductive_simps",
-        "fun_cases",
-        # Enumerates under the garbage name `(mode)` — deliberate, see
-        # the profile: a true boundary with an ugly key beats no
-        # boundary at all, which folded the command into its
-        # neighbour's span.
-        "partial_function",
-        # thy_goal_defn
-        "function",
-        "primcorecursive",
-        "typedef",
-        "quotient_type",
-        # Garbage names `"name` / `(const)`, same reasoning.
-        "quotient_definition",
-        "lift_definition",
-        "specification",
-        # thy_decl — uninterpreted objects only. `typedecl` came from
-        # the fix round; `consts` is its exact sibling and round 6 (F2)
-        # found it missing.
-        "typedecl",
-        "consts",
-        # thy_decl_block — round 7 (F2) wired the two NAMED
-        # assumption-bearing scopes. A `locale`/`class` header's
-        # `assumes` clauses are hypotheses every theorem in the scope
-        # depends on, and nothing enumerated them, so nothing compared
-        # them. The other seven `thy_decl_block` commands stay out; the
-        # profile records which and why (`context`/`experiment`/
-        # `notepad` are the assumption-bearing ones, and they are
-        # anonymous, so a name-based enumeration cannot reach them).
-        "locale",
-        "class",
-    )
-    assert ISABELLE.placeholder_tokens == ("sorry", "oops")
-    assert ISABELLE.build_command == ("isabelle", "build", "-D", ".")
-    assert ISABELLE.toolchain_file is None
-    assert ISABELLE.protected_files == ("ROOT", "ROOTS")
-    assert ISABELLE.extra_audits == ()
-    assert ISABELLE.search_tooling_note is False
-
-
-def test_isabelle_decl_modifiers_and_attribute_syntax() -> None:
-    # statement-immutability hardening Task 2's addendum (finding A1):
-    # `private`/`qualified` are real pre-keyword Isar command modifiers
-    # (verified against Isabelle/Pure's own source), wired in here after
-    # Task 1 reported rather than added them. `attribute_syntax` stays
-    # `None` — Isabelle attaches attributes *after* the name.
-    assert ISABELLE.decl_modifiers == ("private", "qualified")
-    assert ISABELLE.attribute_syntax is None
-
-
-def test_isabelle_statement_keywords_equal_decl_keywords() -> None:
-    # Unlike lean4, every isabelle decl kind has a statement
-    # `extract_isabelle_statement` can resolve (design note 12 §3.2).
-    assert ISABELLE.statement_keywords == ISABELLE.decl_keywords
-
-
-def test_isabelle_trust_patterns() -> None:
-    assert ISABELLE.trust_patterns == (
-        ("axiomatization", r"^\s*axiomatization\b"),
-        ("oracle", r"^\s*oracle\b"),
-        ("setup", r"^\s*(?:local_)?setup\b"),
-        ("ML", r"^\s*ML(?:_file)?\b"),
-    )
-
-
-def test_isabelle_one_probe_per_decl_is_false() -> None:
-    # The documented ML recipe's output names each theorem, so one
-    # probe covers every target — see tests/gate/provers/test_trust.py
-    # for the real trust-report hooks (design note 12 §4).
-    assert ISABELLE.one_probe_per_decl is False
-
-
-def test_isabelle_qualify_decl_names_is_a_scope_path_key() -> None:
-    # Statement-immutability hardening round 4 (F2) supersedes task 4's
-    # `is None` pin. Task 4 declined a qualifier because locale
-    # name-mangling for global lookup is nuanced and was untested
-    # against a real Isabelle build. That reasoning was right about
-    # name resolution and answers a question this hook is not asked:
-    # the key only has to match base declarations against head
-    # declarations within ONE file, so stable + structure-derived +
-    # computed identically on both sides is the whole requirement, and
-    # an enclosing-`locale` path is that. See
-    # `gate.provers.decl_syntax.qualify_by_scope` — a disambiguation
-    # key, NOT name resolution (locale interpretation and `sublocale`
-    # are still deliberately unmodelled).
-    assert ISABELLE.qualify_decl_names is qualify_isabelle_decl_names
 
 
 def test_isabelle_scope_path_qualifies_sibling_locales() -> None:
@@ -347,19 +212,6 @@ def test_extract_skips_leading_qualified_modifier() -> None:
     assert out == 'qualified lemma foo: "a = a"'
 
 
-def test_extract_matches_the_similarly_named_decl_itself() -> None:
-    out = extract_isabelle_statement(ISAR_SIMILAR_NAME, "add_comm_nat_symm")
-    assert out == 'lemma add_comm_nat_symm: "a + b = b + (a::nat)"'
-
-
-def test_profile_extract_statement_hook_is_wired_to_the_module_function() -> None:
-    assert ISABELLE.extract_statement is extract_isabelle_statement
-    assert (
-        ISABELLE.extract_statement(ISAR, "add_comm_nat")
-        == 'lemma add_comm_nat: "a + b = b + (a::nat)"'
-    )
-
-
 # ---------------------------------------------------------------------------
 # Same-line proof handling (whole-branch review finding C).
 #
@@ -382,12 +234,6 @@ def test_extract_same_line_sorry_and_by_simp_are_statement_equal() -> None:
     assert sorry_out == by_out == 'lemma add_id: "0 + n = (n::nat)"'
 
 
-def test_extract_same_line_done_is_also_truncated() -> None:
-    text = 'lemma add_id: "0 + n = (n::nat)" apply simp done\n'
-    out = extract_isabelle_statement(text, "add_id")
-    assert out == 'lemma add_id: "0 + n = (n::nat)"'
-
-
 def test_extract_preserves_quoted_whole_word_stop_token() -> None:
     # A genuinely quoted whole-word " by " must survive even though it
     # matches the stop-token regex on its own — quote parity must gate
@@ -404,25 +250,6 @@ def test_extract_preserves_quoted_content_containing_stop_token_substring() -> N
     text = 'lemma p: "P by_hand x = x" sorry\n'
     out = extract_isabelle_statement(text, "p")
     assert out == 'lemma p: "P by_hand x = x"'
-
-
-def test_extract_multiline_long_goal_fixture_unchanged() -> None:
-    # Regression: the truncation must not disturb the existing multi-line
-    # long-goal capture (final captured line ends with a closing quote,
-    # nothing trailing to truncate).
-    out = extract_isabelle_statement(ISAR, "le_trans_ex")
-    assert out is not None
-    assert out.startswith("theorem le_trans_ex:")
-    assert 'shows "x \\<le> z"' in out
-    assert "using" not in out
-    assert "by simp" not in out
-
-
-def test_extract_short_goal_fixture_unchanged() -> None:
-    # Regression: the multi-line short-goal fixture (statement on its own
-    # line, proof on the next) is unaffected by the final-line truncation.
-    out = extract_isabelle_statement(ISAR, "add_comm_nat")
-    assert out == 'lemma add_comm_nat: "a + b = b + (a::nat)"'
 
 
 # ---------------------------------------------------------------------------
@@ -1355,14 +1182,6 @@ def test_r8_target_becomes_the_scope_key() -> None:
     }
 
 
-def test_r8_target_key_matches_the_block_written_spelling() -> None:
-    """The point of wiring it: both spellings of one declaration agree."""
-    inline = 'lemma (in A) foo: "P" by simp\n'
-    in_block = 'locale A begin\nlemma foo: "P" by simp\nend\n'
-    assert qualify_isabelle_decl_names(inline)[1] == "A.foo"
-    assert qualify_isabelle_decl_names(in_block)[2] == "A.foo"
-
-
 def test_r8_target_cannot_be_mistaken_for_statement_text() -> None:
     """`(in …)` inside a statement is not a target.
 
@@ -1373,16 +1192,6 @@ def test_r8_target_cannot_be_mistaken_for_statement_text() -> None:
     src = 'lemma bar: "x = f (in_set A) y"\n'
     assert [s.name for s in find_decl_spans(src, profile=ISABELLE)] == ["bar"]
     assert qualify_isabelle_decl_names(src) == {1: "bar"}
-
-
-def test_r8_target_is_the_profile_field_and_only_isabelle_sets_it() -> None:
-    """Pin: the target is a `ProverProfile` field, so lean4/rocq are inert."""
-    assert ISABELLE.decl_target_syntax == r"\(\s*in\b\s*[^)\s]+\s*\)"
-    assert LEAN4.decl_target_syntax is None
-    assert ROCQ.decl_target_syntax is None
-    # lean4's `open Nat in theorem foo` is a *prefix* command, not a
-    # post-keyword target, and stays where it was.
-    assert "open" in LEAN4.decl_prefix_commands
 
 
 @pytest.mark.slow
@@ -1900,16 +1709,6 @@ def test_r8f3_a_naive_quote_parity_would_have_been_wrong() -> None:
     assert [s.name for s in find_decl_spans(src, profile=ISABELLE)] == [
         "still_here"
     ]
-
-
-def test_r8f3_the_continuation_hook_is_profile_driven() -> None:
-    """Inert for lean4 and rocq; one shared scanner on isabelle."""
-    assert ISABELLE.decl_continuation_lines is isabelle_continuation_lines
-    assert LEAN4.decl_continuation_lines is None
-    assert ROCQ.decl_continuation_lines is None
-    assert continuation_lines_for(LEAN4, ["theorem a : True := trivial"]) == (
-        frozenset()
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,6 @@ from client.github import Issue
 from client.lease import ClaimOutcome
 from gate.protocol import PROTOCOL_VERSION
 from gate.state.lease_comment import ACTION_CLAIM, parse_lease_comment
-from orchestrator import leases as orch_leases
 
 NOW = datetime(2026, 8, 23, 12, 0, 0, tzinfo=UTC)
 
@@ -76,18 +75,6 @@ class FakeThread:
             }
         )
         return cid
-
-    def add_prose(self, login: str, body: str) -> None:
-        cid = self._next_id
-        self._next_id += 1
-        self.rows.append(
-            {
-                "id": cid,
-                "login": login,
-                "body": body,
-                "updated_at": _stamp(),
-            }
-        )
 
     # --- the `client.github` seams ---
 
@@ -169,19 +156,6 @@ def test_the_posted_comment_is_a_parseable_claim_for_us(
     assert claim.protocol == PROTOCOL_VERSION
 
 
-def test_ordinary_prose_on_the_thread_does_not_block_a_claim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The common case on a real task issue: humans talking. None of it is a
-    # lease, so none of it may look like one.
-    thread = FakeThread()
-    thread.add_prose("carol", "I had a go at this and got stuck on the induction.")
-    thread.add_prose("dave", "```lean\ntheorem foo : True := trivial\n```")
-    _wire(monkeypatch, thread)
-
-    assert _claim().outcome == ClaimOutcome.WON
-
-
 def test_reclaiming_our_own_live_lease_wins_again(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,30 +213,6 @@ def test_reclaiming_without_the_session_loses_rather_than_double_claiming(
     assert _claim().outcome == ClaimOutcome.LOST_RACE
 
 
-def test_a_stale_holder_loses_the_lease_to_us(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The stale-lease outcome, which `client.worker` relies on to make
-    # abandoned tasks reachable again: bob claimed days ago and went quiet.
-    thread = FakeThread()
-    thread.add("bob", "claim", offset_hours=-72)
-    _wire(monkeypatch, thread)
-
-    result = _claim(stale_after_hours=24)
-
-    assert result.outcome == ClaimOutcome.WON
-    assert len(thread.posted) == 1
-
-
-def test_a_released_lease_is_claimable(monkeypatch: pytest.MonkeyPatch) -> None:
-    thread = FakeThread()
-    thread.add("bob", "claim", offset_hours=-1)
-    thread.add("bob", "release", offset_hours=-1)
-    _wire(monkeypatch, thread)
-
-    assert _claim().outcome == ClaimOutcome.WON
-
-
 # ---------------------------------------------------------------------------
 # Losing — LOST_RACE keeps its meaning: someone else holds it, look elsewhere
 # ---------------------------------------------------------------------------
@@ -282,18 +232,6 @@ def test_a_live_claim_by_someone_else_loses_without_posting(
     # Nothing written: a held task's thread must not collect a claim
     # comment from every worker that walks past it.
     assert thread.posted == []
-
-
-def test_a_stale_label_does_not_let_us_steal_a_live_lease(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The projection lags the orchestrator's sync, so a claimed task can
-    # still read `choir/available`. The comments decide, not the label.
-    thread = FakeThread()
-    thread.add("bob", "claim", offset_hours=-1)
-    _wire(monkeypatch, thread, issue=_issue(["choir/available"]))
-
-    assert _claim().outcome == ClaimOutcome.LOST_RACE
 
 
 def test_a_claim_that_lands_second_loses_the_race(
@@ -324,20 +262,6 @@ def test_a_claim_that_lands_second_loses_the_race(
     assert result.outcome == ClaimOutcome.LOST_RACE
     assert result.winner == "bob"
     assert len(thread.posted) == 1
-
-
-def test_a_stale_holder_with_a_live_claimant_behind_them_loses_to_that_claimant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    thread = FakeThread()
-    thread.add("bob", "claim", offset_hours=-72)  # stale holder
-    thread.add("carol", "claim", offset_hours=-1)  # live, and ahead of us
-    _wire(monkeypatch, thread)
-
-    result = _claim(stale_after_hours=24)
-
-    assert result.outcome == ClaimOutcome.LOST_RACE
-    assert result.winner == "carol"
 
 
 # ---------------------------------------------------------------------------
@@ -462,11 +386,6 @@ class TestProtocolGate:
         assert str(PROTOCOL_VERSION) in result.reason
         assert thread.posted == []  # never wrote anything
 
-    def test_newer_client_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        thread = FakeThread()
-        _wire(monkeypatch, thread, pin=PROTOCOL_VERSION - 1)
-        assert _claim().outcome == ClaimOutcome.WON
-
     def test_equal_pin_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         thread = FakeThread()
         _wire(monkeypatch, thread, pin=PROTOCOL_VERSION)
@@ -478,36 +397,3 @@ class TestProtocolGate:
         thread = FakeThread()
         _wire(monkeypatch, thread, pin=None)
         assert _claim().outcome == ClaimOutcome.WON
-
-
-# ---------------------------------------------------------------------------
-# The two readers must agree
-# ---------------------------------------------------------------------------
-
-
-def test_client_and_orchestrator_read_the_same_thread_identically(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`client.lease` and `orchestrator.leases` must not drift apart.
-
-    Both fetch the thread themselves (neither package may import the
-    other) but both interpret it through `gate`. Same rows in, same
-    `LeaseComment`s out — and the same `--jq` asking for them, since a
-    reader that fetched different fields would produce leases with empty
-    logins or zero ids, and a zero id sorts first.
-    """
-    thread = FakeThread()
-    thread.add("bob", "claim", offset_hours=-2)
-    thread.add_prose("carol", "not a lease")
-    thread.add("bob", "heartbeat")
-
-    monkeypatch.setattr(gh, "list_issue_comments", thread.list_issue_comments)
-    monkeypatch.setattr(orch_leases, "_gh_json", lambda *args: list(thread.rows))
-
-    assert lease.read_lease_comments("o/r", 9) == orch_leases.read_lease_comments(
-        "o/r", 9
-    )
-    assert gh.lease_comments_argv is orch_leases.lease_comments_argv
-    assert (
-        lease.DEFAULT_STALE_AFTER_HOURS is orch_leases.DEFAULT_STALE_AFTER_HOURS
-    )

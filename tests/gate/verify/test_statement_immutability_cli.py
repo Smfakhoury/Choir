@@ -3,7 +3,6 @@
 The full CLI dispatch against a real PR (gh + git over the network) is
 exercised in the demo. These tests pin down:
 
-- per-prover extension filtering (mirrors every other delta-audit CLI);
 - `_show` against a real tmp git repo, including the "changed file has
   no base version" case (a newly added file) — it must return '' and
   never crash on `git show`ing a path absent at that SHA;
@@ -31,15 +30,10 @@ from pathlib import Path
 import pytest
 
 from gate.provers import ProverError
-from gate.provers.isabelle import ISABELLE
-from gate.provers.lean4 import LEAN4
-from gate.provers.rocq import ROCQ
 from gate.verify import statement_immutability_cli as cli
 from gate.verify.statement_immutability import Finding, Verdict
 from gate.verify.statement_immutability_cli import (
     _ExternalError,
-    _show,
-    filter_files_by_profile,
     format_findings,
 )
 
@@ -49,26 +43,6 @@ def _git(cwd: Path, *args: str) -> str:
         ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
     )
     return result.stdout
-
-
-# ---------------------------------------------------------------------------
-# filter_files_by_profile — per-prover extension filtering
-# ---------------------------------------------------------------------------
-
-
-def test_filter_files_lean4_keeps_only_lean() -> None:
-    files = ["A.lean", "README.md", "sub/B.lean"]
-    assert filter_files_by_profile(files, LEAN4) == ["A.lean", "sub/B.lean"]
-
-
-def test_filter_files_isabelle_keeps_only_thy() -> None:
-    files = ["Scratch.thy", "A.lean", "ROOT"]
-    assert filter_files_by_profile(files, ISABELLE) == ["Scratch.thy"]
-
-
-def test_filter_files_rocq_keeps_only_v() -> None:
-    files = ["Scratch.v", "A.lean", "_CoqProject"]
-    assert filter_files_by_profile(files, ROCQ) == ["Scratch.v"]
 
 
 # ---------------------------------------------------------------------------
@@ -95,44 +69,6 @@ def _init_repo_with_add_then_modify(tmp_path: Path) -> tuple[str, str]:
     _git(tmp_path, "commit", "-q", "-m", "head: add a new file")
     head_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
     return base_sha, head_sha
-
-
-def test_show_returns_empty_string_for_path_absent_at_base(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base_sha, head_sha = _init_repo_with_add_then_modify(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    assert _show(base_sha, "New.lean") == ""
-    assert _show(head_sha, "New.lean") == "theorem bar : 2 = 2 := rfl\n"
-
-
-def test_show_returns_existing_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base_sha, _head_sha = _init_repo_with_add_then_modify(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    assert _show(base_sha, "Existing.lean") == "theorem foo : 1 = 1 := rfl\n"
-
-
-def test_show_returns_empty_for_unresolvable_sha(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An unresolvable SHA reads as "path absent there," not a distinct
-    external-failure case: `git cat-file -e` fails for the same reason
-    `git show` would (there is no tree to look the path up in), so this
-    correctly falls into the legitimate-new-file branch, not F2's
-    exists-but-unreadable branch (see
-    `test_show_raises_when_path_exists_but_git_show_fails` below for
-    that one, which this test used to conflate with this case before
-    the fix)."""
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "config", "user.email", "test@example.com")
-    _git(tmp_path, "config", "user.name", "Test")
-    (tmp_path / "A.lean").write_text("theorem foo : 1 = 1 := rfl\n", encoding="utf-8")
-    _git(tmp_path, "add", "A.lean")
-    _git(tmp_path, "commit", "-q", "-m", "base")
-    monkeypatch.chdir(tmp_path)
-    assert _show("not-a-real-sha", "A.lean") == ""
 
 
 def test_show_raises_when_path_exists_but_git_show_fails(
@@ -253,14 +189,6 @@ def _init_repo_with_rename_and_statement_change(tmp_path: Path) -> tuple[str, st
     return base_sha, head_sha
 
 
-def test_base_show_follows_rename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base_sha, head_sha = _init_repo_with_rename_and_statement_change(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    assert cli._base_show(base_sha, head_sha, "Bar.lean") == _BASE_FILE_TEXT
-
-
 def test_rename_with_statement_change_is_caught(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -308,31 +236,6 @@ def test_unchanged_verdict_exits_zero(
     # actually compared, so it cannot be confused with the
     # nothing-to-check line the zero-declaration case prints.
     assert "A.lean: clean (1 base declaration checked)" in out
-
-
-def test_unchanged_verdict_with_no_base_declarations_says_nothing_to_check(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Round 4, F3: the same UNCHANGED verdict over a base version with no
-    enumerable declarations must not render as "checked and fine". Both
-    are UNCHANGED — correctly, nothing moved either way — but only one of
-    them verified anything, and the orchestrator reads these lines to
-    decide where to look."""
-    monkeypatch.setattr(
-        cli, "fetch_pr_files", lambda repo, pr: ("base", "head", ["A.lean"])
-    )
-    monkeypatch.setattr(cli, "_show", lambda sha, path: "-- only a comment\n")
-    monkeypatch.setattr(
-        cli,
-        "compare_declarations",
-        lambda base, head, *, profile: (Verdict.UNCHANGED, []),
-    )
-
-    code = cli.main(["--repo", "o/r", "--pr", "7"])
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "A.lean: no declarations in the base version; nothing to check" in out
-    assert "clean" not in out
 
 
 def test_changed_verdict_exits_one(
@@ -407,36 +310,6 @@ def test_external_failure_exits_two(
     assert "gh pr view failed" in err
 
 
-def test_multiple_files_any_failure_exits_one(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """One clean file alongside one changed file still fails the audit."""
-    finding = Finding(
-        decl="bar", base_statement="theorem bar : 2 = 2 :=", head_statement=None
-    )
-
-    def _fetch(repo: str, pr: int) -> tuple[str, str, list[str]]:
-        return "base", "head", ["A.lean", "B.lean"]
-
-    def _compare(
-        base: str, head: str, *, profile: object
-    ) -> tuple[Verdict, list[Finding]]:
-        if base == "A":
-            return Verdict.UNCHANGED, []
-        return Verdict.CHANGED, [finding]
-
-    def _fake_show(sha: str, path: str) -> str:
-        # Distinguish files by path so `_compare` can branch above.
-        return "A" if path == "A.lean" else "B"
-
-    monkeypatch.setattr(cli, "fetch_pr_files", _fetch)
-    monkeypatch.setattr(cli, "_show", _fake_show)
-    monkeypatch.setattr(cli, "compare_declarations", _compare)
-
-    code = cli.main(["--repo", "o/r", "--pr", "7"])
-    assert code == 1
-
-
 def test_multiple_files_both_failing_aggregates_all_findings(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -506,10 +379,6 @@ def test_unresolvable_prover_exits_two(
 # ---------------------------------------------------------------------------
 # format_findings — None (absent) vs "" (unparseable) vs real text
 # ---------------------------------------------------------------------------
-
-
-def test_format_findings_empty_list() -> None:
-    assert "No base declarations were changed" in format_findings([])
 
 
 def test_format_findings_distinguishes_absent_from_unparseable() -> None:

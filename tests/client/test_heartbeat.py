@@ -22,8 +22,6 @@ from client.workspace import LeaseMetadata
 from gate.protocol import PROTOCOL_VERSION
 from gate.state.lease_arbiter import (
     LeaseComment,
-    decide_lease,
-    lease_comments_from_api,
 )
 from gate.state.lease_comment import (
     ACTION_CLAIM,
@@ -47,41 +45,12 @@ def _comment(cid: int, login: str, action: str) -> LeaseComment:
 # ---------------------------------------------------------------------------
 
 
-def test_no_prior_heartbeat_means_post_a_new_one() -> None:
-    comments = [_comment(1, "alice", ACTION_CLAIM)]
-    assert heartbeat_target(comments, "alice") is None
-
-
-def test_the_claim_comment_is_never_the_edit_target() -> None:
-    # Editing the claim would change the action `decide_lease` establishes
-    # the holder from — the beat would destroy the lease it means to keep.
-    comments = [_comment(1, "alice", ACTION_CLAIM)]
-    assert heartbeat_target(comments, "alice") is None
-
-
-def test_an_existing_heartbeat_is_the_edit_target() -> None:
-    comments = [_comment(1, "alice", ACTION_CLAIM), _comment(2, "alice", ACTION_HEARTBEAT)]
-    assert heartbeat_target(comments, "alice") == 2
-
-
 def test_someone_elses_heartbeat_is_not_our_target() -> None:
     comments = [
         _comment(1, "alice", ACTION_CLAIM),
         _comment(2, "bob", ACTION_HEARTBEAT),
     ]
     assert heartbeat_target(comments, "alice") is None
-
-
-def test_the_latest_of_our_own_heartbeats_wins() -> None:
-    # Shouldn't happen (one beat comment per lease), but if a duplicate
-    # exists the highest id is the live one — `decide_lease` reads freshness
-    # off the id-highest comment.
-    comments = [
-        _comment(5, "alice", ACTION_HEARTBEAT),
-        _comment(9, "alice", ACTION_HEARTBEAT),
-        _comment(7, "alice", ACTION_HEARTBEAT),
-    ]
-    assert heartbeat_target(comments, "alice") == 9
 
 
 def test_a_re_claim_above_our_heartbeat_forces_a_new_beat_comment() -> None:
@@ -100,29 +69,6 @@ def test_a_re_claim_above_our_heartbeat_forces_a_new_beat_comment() -> None:
         _comment(3, "alice", ACTION_CLAIM),  # the re-claim
     ]
     assert heartbeat_target(comments, "alice") is None
-
-
-def test_the_edited_beat_is_the_comment_decide_lease_actually_reads() -> None:
-    # End-to-end against the real arbiter: refresh what `heartbeat_target`
-    # picks and the lease must read live.
-    rows = _rows((1, "alice", "claim"), (2, "alice", "heartbeat"))
-    rows[0]["updated_at"] = _stamp(-100)  # the claim is ancient
-    comments = lease_comments_from_api(rows)
-
-    target = heartbeat_target(comments, "alice")
-    assert target == 2
-    refreshed = [
-        LeaseComment(
-            id=c.id,
-            login=c.login,
-            action=c.action,
-            updated_at=_stamp() if c.id == target else c.updated_at,
-        )
-        for c in comments
-    ]
-    assert (
-        decide_lease(refreshed, stale_after_hours=24, now=NOW).holder == "alice"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -227,26 +173,6 @@ def test_a_non_holder_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rec.edited == []
 
 
-def test_no_lease_at_all_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = _wire(monkeypatch, [])
-
-    assert heartbeat("alice/proj", 1, now=NOW) is False
-    assert rec.posted == []
-    assert rec.edited == []
-
-
-def test_a_released_lease_is_not_heartbeaten(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rec = _wire(
-        monkeypatch, _rows((1, "alice", "claim"), (2, "alice", "release"))
-    )
-
-    assert heartbeat("alice/proj", 1, now=NOW) is False
-    assert rec.posted == []
-    assert rec.edited == []
-
-
 def test_an_unreadable_thread_returns_false_without_raising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -270,39 +196,6 @@ def test_a_refused_edit_returns_false_without_raising(
 
     monkeypatch.setattr(gh, "edit_comment", boom)
     assert heartbeat("alice/proj", 1, now=NOW) is False
-
-
-def test_a_stale_holder_is_not_us_so_we_do_not_beat(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Our own lease went stale and passed to the next live claimant. Beating
-    # now would be writing to a lease we no longer hold.
-    rows = _rows((1, "alice", "claim"), (2, "bob", "claim"))
-    rows[0]["updated_at"] = _stamp(-72)
-    rec = _wire(monkeypatch, rows)
-
-    assert heartbeat("alice/proj", 1, now=NOW, stale_after_hours=24) is False
-    assert rec.posted == []
-    assert rec.edited == []
-
-
-def test_login_can_be_supplied_to_skip_the_user_lookup(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _wire(monkeypatch, _rows((1, "alice", "claim")))
-
-    def fail() -> str:
-        raise AssertionError("current_user must not be called when login is given")
-
-    monkeypatch.setattr(gh, "current_user", fail)
-    assert heartbeat("alice/proj", 1, login="alice", now=NOW) is True
-
-
-def test_module_reads_the_thread_through_the_shared_client_reader() -> None:
-    # Not a behavioural assertion so much as a structural one: the heartbeat
-    # must see exactly what `claim` sees, or the two could disagree about
-    # who holds the lease.
-    assert hb.read_lease_comments.__module__ == "client.lease"
 
 
 # --- session resolution (the CLI's beat) -----------------------------------

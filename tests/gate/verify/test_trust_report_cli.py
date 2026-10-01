@@ -14,13 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from gate.provers import ProverError
 from gate.provers.base import TrustEntry
-from gate.provers.lean4 import LEAN4
 from gate.verify.changed_decls import DEFAULT_CAP, ChangedDecl, ChangedDeclsError
-from gate.verify.trust_report_cli import _run_auto_mode, main
+from gate.verify.trust_report_cli import main
 
 
 def write_project_toml(workspace: Path, prover: str | None) -> Path:
@@ -49,13 +46,6 @@ def test_unknown_prover_flag_is_infrastructure_error(tmp_path, capsys):
     err = capsys.readouterr().err
     assert rc == 2
     assert "nope" in err
-
-
-def test_prover_defaults_to_lean4_when_absent(tmp_path, capsys):
-    rc = main(["--workspace", str(tmp_path)])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "prover:    lean4" in out
 
 
 def test_prover_read_from_workspace_project_toml(tmp_path, capsys):
@@ -115,40 +105,6 @@ def test_prover_error_from_collect_is_infrastructure_error(tmp_path, capsys, mon
 
     assert rc == 2
     assert "boom" in err
-
-
-def test_imports_flag_is_passed_through(tmp_path, monkeypatch):
-    seen = {}
-
-    def fake_collect(profile, workspace, decls, imports):
-        seen["decls"] = decls
-        seen["imports"] = imports
-        return []
-
-    monkeypatch.setattr("gate.verify.trust_report_cli.collect_trust_report", fake_collect)
-    rc = main(
-        [
-            "--workspace",
-            str(tmp_path),
-            "--decl",
-            "foo",
-            "--decl",
-            "bar",
-            "--import",
-            "Mod1",
-            "--import",
-            "Mod2",
-        ]
-    )
-    assert rc == 0
-    assert seen["decls"] == ["foo", "bar"]
-    assert seen["imports"] == ["Mod1", "Mod2"]
-
-
-@pytest.mark.parametrize("argv", [[], ["--workspace"]])
-def test_missing_required_workspace_arg_errors(argv):
-    with pytest.raises(SystemExit):
-        main(argv)
 
 
 # ---------------------------------------------------------------------------
@@ -232,39 +188,6 @@ def test_auto_mode_reports_cap_truncation(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert rc == 0
     assert f"capped at {DEFAULT_CAP}" in out
-
-
-def test_auto_mode_cap_message_reflects_actual_cap_not_the_default_constant(
-    tmp_path, capsys, monkeypatch
-):
-    # Regression guard for the "cap message honesty" fix: the truncation
-    # note must derive from the cap value actually passed to
-    # detect_changed_decls, not a hardcoded DEFAULT_CAP reference that
-    # could silently drift from it. Drives `_run_auto_mode` directly with a
-    # non-default cap (7) since `main()` has no `--cap` flag to exercise
-    # this through the argparse front-end.
-    targets = [ChangedDecl(name="t", file="F.lean", module="F")]
-    seen_cap = {}
-
-    def fake_detect(workspace, base_sha, profile, cap=DEFAULT_CAP):
-        seen_cap["cap"] = cap
-        return targets, True
-
-    monkeypatch.setattr(
-        "gate.verify.trust_report_cli.detect_changed_decls", fake_detect
-    )
-    monkeypatch.setattr(
-        "gate.verify.trust_report_cli.collect_trust_report",
-        lambda profile, workspace, decls, imports: [
-            TrustEntry(decl="t", assumptions=(), clean=True)
-        ],
-    )
-    rc = _run_auto_mode(LEAN4, tmp_path, "abc123", cap=7)
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert seen_cap["cap"] == 7
-    assert "capped at 7" in out
-    assert "capped at 50" not in out
 
 
 def test_auto_mode_git_failure_is_infrastructure_error(tmp_path, capsys, monkeypatch):

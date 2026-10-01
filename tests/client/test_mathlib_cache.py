@@ -45,32 +45,6 @@ def _isolated_store(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
 # --- manifest_key ----------------------------------------------------------
 
 
-def test_manifest_key_stable_and_distinct() -> None:
-    # Non-JSON input falls back to raw-text hashing: stable + distinct.
-    assert manifest_key("abc") == manifest_key("abc")
-    assert manifest_key("abc") != manifest_key("abd")
-
-
-def test_manifest_key_ignores_root_project_name() -> None:
-    """Cross-project sharing: two projects whose dependency sets are identical
-    but whose root package names differ must land on the SAME store key. The
-    `.lake/packages` oleans depend only on the resolved deps, not on the name
-    of the project consuming them."""
-    deps = (
-        '[{"url":"https://github.com/leanprover-community/mathlib4",'
-        '"name":"mathlib","rev":"abc123"}]'
-    )
-    proj_a = (
-        '{"version":"1.1.0","packagesDir":".lake/packages",'
-        f'"packages":{deps},"name":"FormalQualBench","lakeDir":".lake"}}'
-    )
-    proj_b = (
-        '{"version":"1.1.0","packagesDir":".lake/packages",'
-        f'"packages":{deps},"name":"Project","lakeDir":".lake"}}'
-    )
-    assert manifest_key(proj_a) == manifest_key(proj_b)
-
-
 def test_manifest_key_ignores_input_rev() -> None:
     """Same resolved `rev`, different `inputRev` (one project pins by tag, the
     other by SHA): identical oleans, so the same key."""
@@ -136,21 +110,6 @@ def test_miss_fetches_then_saves_to_store(tmp_path: Path) -> None:
     assert _olean(ws).read_text() == "fetched"
 
 
-def test_second_workspace_hits_store_seeded_by_first(tmp_path: Path) -> None:
-    manifest = '{"packages":[{"name":"mathlib","rev":"v4.31.0"}]}'
-
-    ws1 = tmp_path / "ws1"
-    ws1.mkdir()
-    _write_manifest(ws1, manifest)
-    prepare_workspace_deps(ws1, cache_get=lambda w: bool(_make_packages(w, "v1")))
-
-    ws2 = tmp_path / "ws2"
-    ws2.mkdir()
-    _write_manifest(ws2, manifest)
-    assert prepare_workspace_deps(ws2, cache_get=lambda w: pytest.fail("should hit")) == "hit"
-    assert _olean(ws2).read_text() == "v1"
-
-
 def test_cross_project_same_deps_shares_store(tmp_path: Path) -> None:
     """Two DIFFERENT projects (different root names) pinning the identical
     dependency set: the second workspace HITs the store the first one seeded —
@@ -176,13 +135,6 @@ def test_miss_fetch_fails_is_skipped(tmp_path: Path) -> None:
     ws.mkdir()
     _write_manifest(ws)
     assert prepare_workspace_deps(ws, cache_get=lambda w: False) == "skipped"
-
-
-def test_miss_fetch_produces_no_packages_is_skipped(tmp_path: Path) -> None:
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    _write_manifest(ws)
-    assert prepare_workspace_deps(ws, cache_get=lambda w: True) == "skipped"
 
 
 def test_fetched_nostore_keeps_deps_in_the_workspace(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

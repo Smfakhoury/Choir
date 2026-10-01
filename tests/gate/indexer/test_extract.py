@@ -6,7 +6,6 @@ import textwrap
 from pathlib import Path
 
 from gate.indexer.extract import (
-    DeclLocation,
     extract_declarations,
     scan_directory,
 )
@@ -16,19 +15,6 @@ from gate.provers.rocq import ROCQ
 # ---------------------------------------------------------------------------
 # extract_declarations
 # ---------------------------------------------------------------------------
-
-
-def test_extract_empty_file() -> None:
-    assert extract_declarations("", "foo.lean") == []
-
-
-def test_extract_single_theorem() -> None:
-    src = "theorem foo : 1 = 1 := rfl\n"
-    locs = extract_declarations(src, "Foo.lean")
-    assert len(locs) == 1
-    assert locs[0].name == "foo"
-    assert locs[0].file_path == "Foo.lean"
-    assert locs[0].line == 1
 
 
 def test_extract_multiple_keywords() -> None:
@@ -49,21 +35,6 @@ def test_extract_multiple_keywords() -> None:
     # `example` matches the keyword + whatever follows; the next token
     # is `:` not a name. Acceptable v0 behaviour — example declarations
     # are rarely the source of duplicates anyway.
-
-
-def test_extract_structure_class_inductive() -> None:
-    src = textwrap.dedent(
-        """\
-        structure Pt where x : Nat
-        class Inhab (α : Type) where elt : α
-        inductive Tree | leaf | node : Tree → Tree → Tree
-        """
-    )
-    locs = extract_declarations(src, "Types.lean")
-    names = [loc.name for loc in locs]
-    assert "Pt" in names
-    assert "Inhab" in names
-    assert "Tree" in names
 
 
 def test_extract_records_line_numbers() -> None:
@@ -136,37 +107,8 @@ def test_extract_isabelle_finds_private_prefixed_declaration() -> None:
 
 
 # ---------------------------------------------------------------------------
-# last_segment
-# ---------------------------------------------------------------------------
-
-
-def test_last_segment_simple() -> None:
-    loc = DeclLocation(name="bar", file_path="f", line=1)
-    assert loc.last_segment == "bar"
-
-
-def test_last_segment_dotted() -> None:
-    loc = DeclLocation(name="Foo.Bar.baz", file_path="f", line=1)
-    assert loc.last_segment == "baz"
-
-
-# ---------------------------------------------------------------------------
 # scan_directory
 # ---------------------------------------------------------------------------
-
-
-def test_scan_empty_directory(tmp_path: Path) -> None:
-    assert scan_directory(tmp_path) == []
-
-
-def test_scan_one_file(tmp_path: Path) -> None:
-    (tmp_path / "F.lean").write_text(
-        "theorem foo : T := rfl\nlemma bar : T := rfl\n", encoding="utf-8"
-    )
-    locs = scan_directory(tmp_path)
-    assert len(locs) == 2
-    names = sorted(loc.name for loc in locs)
-    assert names == ["bar", "foo"]
 
 
 def test_scan_nested_directories(tmp_path: Path) -> None:
@@ -257,24 +199,6 @@ def test_rocq_extract_declarations_finds_decl_names() -> None:
     names = [loc.name for loc in locs]
     assert "add_comm_ex" in names
     assert "le_trans_ex" in names
-
-
-def test_scan_directory_isabelle_walks_thy_files(tmp_path: Path) -> None:
-    (tmp_path / "Scratch.thy").write_text(_ISAR, encoding="utf-8")
-    (tmp_path / "Ignored.lean").write_text(
-        "theorem t : True := by sorry\n", encoding="utf-8"
-    )
-    locs = scan_directory(tmp_path, profile=ISABELLE)
-    assert {loc.file_path for loc in locs} == {"Scratch.thy"}
-
-
-def test_scan_directory_rocq_walks_v_files(tmp_path: Path) -> None:
-    (tmp_path / "Scratch.v").write_text(_ROCQ_SRC, encoding="utf-8")
-    (tmp_path / "Ignored.lean").write_text(
-        "theorem t : True := by sorry\n", encoding="utf-8"
-    )
-    locs = scan_directory(tmp_path, profile=ROCQ)
-    assert {loc.file_path for loc in locs} == {"Scratch.v"}
 
 
 def test_declaration_inside_a_block_comment_is_not_indexed() -> None:

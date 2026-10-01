@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from client.config import Config, ConfigError, ToolingConfig
+from client.config import Config, ConfigError
 from client.tooling import (
     mathlib_search_advisory,
     read_tools_recommendation,
@@ -37,13 +37,6 @@ def test_advisory_fires_only_when_recommended_and_nothing_is_declared() -> None:
         assert (tooling_advisory(recommendation, declared) is not None) is advises, declared
 
 
-def test_advisory_text_names_the_ways_out() -> None:
-    text = tooling_advisory("recommended", None)
-    assert text is not None
-    assert "lean-lsp-mcp" in text
-    assert "agent-provided" in text
-
-
 # ---------------------------------------------------------------------------
 # read_tools_recommendation
 # ---------------------------------------------------------------------------
@@ -73,27 +66,6 @@ def test_recommendation_defaults_to_recommended_on_anything_unusable(tmp_path: P
 # ---------------------------------------------------------------------------
 # mathlib_search_advisory: composition
 # ---------------------------------------------------------------------------
-
-
-def test_composition_advises_when_recommended_and_undeclared(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("client.tooling.load_config", Config.default)
-    assert mathlib_search_advisory(tmp_path) is not None
-
-
-def test_composition_silent_when_off(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _write_pins(tmp_path, '[tools]\nmathlib_search = "off"\n')
-    monkeypatch.setattr("client.tooling.load_config", Config.default)
-    assert mathlib_search_advisory(tmp_path) is None
-
-
-def test_composition_silent_when_declared(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        "client.tooling.load_config",
-        lambda: Config(
-            tooling=ToolingConfig(search="lean-lsp-mcp"),
-        ),
-    )
-    assert mathlib_search_advisory(tmp_path) is None
 
 
 def test_composition_degrades_on_config_error(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

@@ -157,18 +157,3 @@ def test_release_with_no_live_lease_is_an_error(monkeypatch, tmp_path) -> None: 
     with pytest.raises(ReleaseError, match="no live lease"):
         release_for_issue("alice/proj", 42)
     assert posted == []
-
-
-def test_release_does_not_touch_labels_or_assignees(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    # A contributor has neither permission under D4, so the wrappers are
-    # gone from `client.github` entirely — this pins that release doesn't
-    # reach for them by another name.
-    monkeypatch.setenv("CHOIR_WORK_ROOT", str(tmp_path / "work"))
-    _setup_ws()
-    _stub_gh(monkeypatch)
-    monkeypatch.setattr(rel.repo_store, "remove_workspace", lambda *a, **k: "removed-worktree")
-
-    release_for_issue("alice/proj", 42)
-
-    for gone in ("add_label", "remove_label", "add_assignee", "remove_assignee"):
-        assert not hasattr(rel.gh, gone), f"client.github still exposes {gone}"

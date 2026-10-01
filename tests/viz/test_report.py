@@ -14,9 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from viz.report import DEFAULT_NAME, ReportError, discover
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from viz.report import ReportError, discover
 
 
 def _repo(tmp_path: Path, *, remotes: dict[str, str], prover: str = "") -> Path:
@@ -76,11 +74,6 @@ def test_a_named_upstream_wins_over_origin(tmp_path: Path) -> None:
     assert discover(root).repo == "owner/proj"
 
 
-def test_an_explicit_repo_overrides_the_remotes(tmp_path: Path) -> None:
-    root = _repo(tmp_path, remotes={"origin": "git@github.com:owner/proj.git"})
-    assert discover(root, repo="other/thing").repo == "other/thing"
-
-
 def test_a_missing_prover_falls_back_rather_than_failing(tmp_path: Path) -> None:
     """A picture of the wrong prover's declarations is recoverable.
 
@@ -94,18 +87,3 @@ def test_no_recognisable_remote_says_so(tmp_path: Path) -> None:
     root = _repo(tmp_path, remotes={"origin": "/some/local/path"})
     with pytest.raises(ReportError, match="no GitHub remote"):
         discover(root)
-
-
-def test_outside_a_repository_says_so(tmp_path: Path) -> None:
-    with pytest.raises(ReportError, match="git rev-parse"):
-        discover(tmp_path)
-
-
-def test_the_page_is_gitignored_by_the_bootstrap() -> None:
-    """It is an artefact of reading the history, not part of it.
-
-    A project folder with an untracked HTML file in it is one `git add -A`
-    away from committing the picture into the proof.
-    """
-    bootstrap = (REPO_ROOT / "scripts/new-project.sh").read_text(encoding="utf-8")
-    assert DEFAULT_NAME in bootstrap

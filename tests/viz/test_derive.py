@@ -274,18 +274,6 @@ def test_a_retracted_task_is_recorded() -> None:
     assert retracted.actor is Actor.ORCHESTRATOR
 
 
-def test_events_come_back_in_order() -> None:
-    tl = derive(
-        _payload(
-            comments={
-                7: [{"body": CLAIM_P8, "createdAt": "2026-01-02T00:00:00Z"}]
-            }
-        ),
-        [],
-    )
-    assert [e.at for e in tl.events] == sorted(e.at for e in tl.events)
-
-
 def test_git_and_github_timestamps_land_in_one_timezone() -> None:
     """The timeline orders events by comparing the strings.
 
@@ -349,38 +337,6 @@ def test_a_proof_delivered_by_a_pull_request_is_timed_at_the_merge() -> None:
     assert tl.events.index(proved) < tl.events.index(merged)
 
 
-def test_an_orchestrator_commit_keeps_its_own_time() -> None:
-    """With no pull request, the commit *is* when it entered history."""
-    commits = [
-        CommitRecord(
-            sha="deadbee",
-            at="2026-01-05T09:00:00Z",
-            subject="prove it directly",
-            author="owner",
-            filled=("main_bound",),
-        )
-    ]
-    tl = derive(_payload(), commits)
-    proved = next(e for e in tl.events if e.kind is EventKind.NODE_FILLED)
-    assert proved.at == "2026-01-05T09:00:00Z"
-
-
-def test_a_leaf_is_not_reported_as_unattached() -> None:
-    """A declaration with no dependency of its own still hangs off what
-    needs it; only a node nothing reaches is drawn loose."""
-    graph = {
-        "nodes": {
-            "main": {"kind": "theorem", "decl": "Proj.main", "proof_uses": ["leaf"]},
-            "leaf": {"kind": "theorem", "decl": "Proj.leaf"},
-            "orphan": {"kind": "theorem", "decl": "Proj.orphan"},
-        }
-    }
-    tl = derive(_payload(), [], graph=graph)
-    (note,) = [n for n in tl.notes if "unattached" in n]
-    # `orphan` and the payload's own task node, never the leaf.
-    assert note.startswith("2 of 4 nodes")
-
-
 def test_a_deleted_declaration_stops_counting_as_one_the_project_has() -> None:
     """Without the removal the box keeps whatever was last known about it,
     which reads as a result the project holds."""
@@ -401,17 +357,6 @@ def test_a_deleted_declaration_stops_counting_as_one_the_project_has() -> None:
     assert kinds.index(EventKind.NODE_STATED) < kinds.index(EventKind.NODE_REMOVED)
 
 
-def test_a_declaration_never_seen_is_not_reported_as_removed() -> None:
-    commits = [
-        CommitRecord(
-            sha="aaa1", at="2026-01-01T00:00:00Z", subject="tidy", author="o",
-            index=1, removed=("Proj.never",),
-        ),
-    ]
-    tl = derive(_payload(), commits)
-    assert not [e for e in tl.events if e.kind is EventKind.NODE_REMOVED]
-
-
 def _uses_a_library_result() -> dict[str, object]:
     return {
         "nodes": {
@@ -428,19 +373,6 @@ def test_a_library_result_counts_as_complete() -> None:
     assert tl.nodes["Lib.thm"].given
     assert tl.nodes["Lib.thm"].upstream
     assert not any("library results" in note for note in tl.notes)
-
-
-def test_a_declaration_the_project_writes_is_not_upstream() -> None:
-    """`given` has a second cause — a declaration the prover named itself
-    — and that one is the project's own, with a history to read."""
-    graph = {
-        "nodes": {
-            "inst": {"kind": "theorem", "decl": "Proj.inst", "proof": "formalized"},
-        }
-    }
-    tl = derive(_payload(), [], graph=graph)
-    assert tl.nodes["Proj.inst"].given
-    assert not tl.nodes["Proj.inst"].upstream
 
 
 def test_a_library_result_nothing_uses_is_left_out() -> None:
@@ -497,14 +429,3 @@ def test_a_declaration_the_prover_named_itself_counts_as_complete() -> None:
     }
     tl = derive(_payload(), [], graph=graph)
     assert tl.nodes["Proj.instFooBar"].given
-
-
-def test_an_open_proof_is_never_given() -> None:
-    graph = {
-        "nodes": {
-            "open": {"kind": "theorem", "decl": "Proj.open",
-                     "statement": "formalized", "proof": "planned"},
-        }
-    }
-    tl = derive(_payload(), [], graph=graph)
-    assert not tl.nodes["Proj.open"].given

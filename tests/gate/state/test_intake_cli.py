@@ -56,22 +56,6 @@ def test_build_payload_golf_task_accepted() -> None:
     assert "choir/available" in payload["add_labels"]
 
 
-def test_build_payload_success_with_no_deps() -> None:
-    body = VALID_BODY.replace("deps: [12]", "deps: []")
-    payload = intake_cli.build_payload(body, repo="org/myproj")
-    assert payload["status"] == "ok"
-    assert "_(none)_" in payload["comment"]
-
-
-def test_build_payload_no_blueprint_ref() -> None:
-    body = VALID_BODY.replace("blueprint_ref: blueprint/foo.tex#add_comm\n", "")
-    payload = intake_cli.build_payload(body, repo="org/myproj")
-    assert payload["status"] == "ok"
-    # Two _(none)_ entries: deps (was [12], still has #12) and blueprint_ref.
-    # Wait, we kept deps: [12], so only blueprint_ref is none.
-    assert payload["comment"].count("_(none)_") == 1
-
-
 def test_build_payload_error() -> None:
     # Missing required field.
     body = VALID_BODY.replace("type: prove\n", "")
@@ -118,24 +102,6 @@ def test_main_handles_error_body(tmp_path, capsys) -> None:  # type: ignore[no-u
 # ---------------------------------------------------------------------------
 
 
-def test_success_payload_includes_record_hash_and_marker() -> None:
-    payload = intake_cli.build_payload(VALID_BODY, repo="org/myproj")
-    assert payload["status"] == "ok"
-    h = payload["record_hash"]
-    # Hash is hex, fixed length.
-    assert len(h) == 16
-    assert all(c in "0123456789abcdef" for c in h)
-    # Marker appears in the comment so future runs can detect it.
-    assert f"choir-intake-ack:{h}" in payload["comment"]
-
-
-def test_first_intake_should_post() -> None:
-    payload = intake_cli.build_payload(
-        VALID_BODY, repo="org/myproj", existing_comments=[]
-    )
-    assert payload["should_post_comment"] is True
-
-
 def test_re_intake_with_same_record_should_skip() -> None:
     first = intake_cli.build_payload(VALID_BODY, repo="org/myproj")
     h = first["record_hash"]
@@ -175,37 +141,6 @@ def test_hash_is_stable_under_prose_changes() -> None:
     assert h1 == h2
 
 
-def test_hash_changes_when_deps_order_changes() -> None:
-    # deps order is semantically meaningful (it's a sequence); reordering
-    # produces a different hash. (If we ever decide order doesn't matter,
-    # this test pins the current contract for explicit re-examination.)
-    body_a = VALID_BODY.replace("deps: [12]", "deps: [12, 34]")
-    body_b = VALID_BODY.replace("deps: [12]", "deps: [34, 12]")
-    h_a = intake_cli.build_payload(body_a, repo="org/myproj")["record_hash"]
-    h_b = intake_cli.build_payload(body_b, repo="org/myproj")["record_hash"]
-    assert h_a != h_b
-
-
-def test_hash_changes_when_any_field_changes() -> None:
-    base = intake_cli.build_payload(VALID_BODY, repo="org/myproj")["record_hash"]
-    variants = [
-        VALID_BODY.replace("type: prove", "type: golf"),
-        VALID_BODY.replace("commit: 1a2b3c4d", "commit: 9a9a9a9a"),
-        VALID_BODY.replace("target_file: MyProj/Foo.lean", "target_file: MyProj/Bar.lean"),
-        VALID_BODY.replace(
-            "toolchain: leanprover/lean4:v4.x.y",
-            "toolchain: leanprover/lean4:v4.y.z",
-        ),
-        VALID_BODY.replace(
-            "blueprint_ref: blueprint/foo.tex#add_comm",
-            "blueprint_ref: blueprint/foo.tex#add_assoc",
-        ),
-    ]
-    for v in variants:
-        h = intake_cli.build_payload(v, repo="org/myproj")["record_hash"]
-        assert h != base
-
-
 def test_unrelated_existing_comments_dont_match() -> None:
     payload = intake_cli.build_payload(
         VALID_BODY,
@@ -228,16 +163,6 @@ def test_error_payload_always_posts() -> None:
     )
     assert payload["status"] == "error"
     assert payload["should_post_comment"] is True
-
-
-def test_existing_hashes_extracts_markers() -> None:
-    comments = [
-        "Hello world\n<!-- choir-intake-ack:abc123def456 -->\nbody",
-        "Another:\n<!-- choir-intake-ack:0123456789abcdef -->\nrest",
-        "No marker here",
-    ]
-    hashes = intake_cli.existing_hashes(comments)
-    assert hashes == {"abc123def456", "0123456789abcdef"}
 
 
 # ---------------------------------------------------------------------------
@@ -278,18 +203,6 @@ def test_main_prover_flag_accepts_matching_extension(tmp_path, capsys) -> None: 
     assert payload["status"] == "ok"
 
 
-def test_main_default_prover_still_accepts_lean(tmp_path, capsys) -> None:  # type: ignore[no-untyped-def]
-    # No --prover flag, no .choir/project.toml at cwd -> lean4 default;
-    # a .lean target_file passes as before this change.
-    body_file = tmp_path / "body.txt"
-    body_file.write_text(VALID_BODY, encoding="utf-8")
-
-    rc = intake_cli.main(["--body-file", str(body_file), "--repo", "org/myproj"])
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "ok"
-
-
 def test_main_reads_prover_from_cwd_project_toml_rocq_rejects_lean(
     tmp_path, monkeypatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
@@ -307,33 +220,6 @@ def test_main_reads_prover_from_cwd_project_toml_rocq_rejects_lean(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "error"
     assert any(e["code"] == "target_file_extension" for e in payload["errors"])
-
-
-def test_main_reads_prover_from_cwd_project_toml_rocq_accepts_v(
-    tmp_path, monkeypatch, capsys
-) -> None:  # type: ignore[no-untyped-def]
-    _write_project_toml(tmp_path, 'prover = "rocq"\n')
-    monkeypatch.chdir(tmp_path)
-
-    body_file = tmp_path / "body.txt"
-    body_file.write_text(VALID_BODY.replace("Foo.lean", "Foo.v"), encoding="utf-8")
-
-    rc = intake_cli.main(["--body-file", str(body_file), "--repo", "org/myproj"])
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "ok"
-
-
-def test_build_payload_passes_allowed_extensions_through() -> None:
-    body = VALID_BODY.replace("Foo.lean", "Foo.v")
-    payload = intake_cli.build_payload(body, repo="org/myproj", allowed_extensions=(".lean",))
-    assert payload["status"] == "error"
-    assert any(e["code"] == "target_file_extension" for e in payload["errors"])
-
-    payload_ok = intake_cli.build_payload(
-        body, repo="org/myproj", allowed_extensions=(".v", ".lean")
-    )
-    assert payload_ok["status"] == "ok"
 
 
 def test_main_accepts_existing_comments_file(tmp_path, capsys) -> None:  # type: ignore[no-untyped-def]

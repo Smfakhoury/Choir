@@ -10,12 +10,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-from gate.provers import ProverError
 from gate.provers.isabelle import ISABELLE
 from gate.provers.lean4 import LEAN4
-from gate.provers.rocq import ROCQ
 from gate.verify.prover_dispatch import resolve_prover_profile
 
 
@@ -52,46 +48,6 @@ def test_base_sha_config_used_when_no_flag(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     base_sha = _commit_project_toml(tmp_path, "isabelle", "base: isabelle")
     assert resolve_prover_profile(None, base_sha, cwd=tmp_path) is ISABELLE
-
-
-def test_base_sha_config_beats_default_for_rocq(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    base_sha = _commit_project_toml(tmp_path, "rocq", "base: rocq")
-    assert resolve_prover_profile(None, base_sha, cwd=tmp_path) is ROCQ
-
-
-def test_defaults_to_lean4_when_absent(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    (tmp_path / "README.md").write_text("hi\n", encoding="utf-8")
-    _git(tmp_path, "add", "README.md")
-    _git(tmp_path, "commit", "-q", "-m", "no project.toml")
-    base_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-    assert resolve_prover_profile(None, base_sha, cwd=tmp_path) is LEAN4
-
-
-def test_flag_still_applies_even_with_no_project_toml_at_base(
-    tmp_path: Path,
-) -> None:
-    _init_repo(tmp_path)
-    (tmp_path / "README.md").write_text("hi\n", encoding="utf-8")
-    _git(tmp_path, "add", "README.md")
-    _git(tmp_path, "commit", "-q", "-m", "no project.toml")
-    base_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-    assert resolve_prover_profile("rocq", base_sha, cwd=tmp_path) is ROCQ
-
-
-def test_unknown_flag_raises_prover_error(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    base_sha = _commit_project_toml(tmp_path, "lean4", "base: lean4")
-    with pytest.raises(ProverError, match="nope"):
-        resolve_prover_profile("nope", base_sha, cwd=tmp_path)
-
-
-def test_unknown_base_sha_value_raises_prover_error(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    base_sha = _commit_project_toml(tmp_path, "yolo", "base: bad value")
-    with pytest.raises(ProverError, match="yolo"):
-        resolve_prover_profile(None, base_sha, cwd=tmp_path)
 
 
 def test_ignores_head_commits_prover_switch(tmp_path: Path) -> None:

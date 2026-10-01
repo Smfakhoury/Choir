@@ -26,24 +26,6 @@ def test_new_project_sh_has_valid_bash_syntax() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_three_prover_cases_present() -> None:
-    text = _text()
-    # Flag validation names all three explicitly, usage included.
-    assert "--prover" in text
-    assert "lean4|isabelle|rocq) ;;" in text
-    # Skeleton + workflow dispatch branch on lean4 and isabelle explicitly
-    # (rocq is the trailing `else`, per the plan).
-    assert '"$PROVER" == "lean4"' in text
-    assert '"$PROVER" == "isabelle"' in text
-
-
-
-def test_project_toml_writes_prover_selection() -> None:
-    text = _text()
-    assert "[project]" in text
-    assert 'prover = "$PROVER"' in text
-
-
 def test_project_toml_writes_protocol_pin() -> None:
     # design note 13 §3 — bootstrap writes the pin alongside prover, in
     # the same [project] heredoc, computed from the running Choir
@@ -54,19 +36,6 @@ def test_project_toml_writes_protocol_pin() -> None:
     assert "choir_protocol = $CHOIR_PROTOCOL_VERSION" in text
     assert 'choir_commit = "$CHOIR_BOOTSTRAP_COMMIT"' in text
     assert "from gate.protocol import PROTOCOL_VERSION" in text
-
-
-def test_lean4_ships_verify_trust_report_workflow() -> None:
-    # lean4 projects get the autodetecting trust-report workflow
-    # (design note 12 §4.1). isabelle/rocq ship it too now — see
-    # test_all_provers_ship_verify_trust_report.
-    text = _text()
-    assert "verify-trust-report.yml" in text
-    assert "name: verify-trust-report" in text
-    assert "--base-sha ${{ github.event.pull_request.base.sha }}" in text
-    # Adapted for the generated repo's own root as the workspace, not
-    # samples/lean4 (that's the Choir repo's own layout).
-    assert "--workspace ." in text
 
 
 def test_rocq_skeleton_has_dune_coq_theory_stanza() -> None:

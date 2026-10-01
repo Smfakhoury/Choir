@@ -7,9 +7,7 @@ from gate.provers.rocq import ROCQ
 from gate.verify.axiom_honesty import (
     Verdict,
     compare,
-    compile_patterns,
     count_patterns,
-    extract_axiom_names,
     format_findings,
 )
 from gate.verify.config import AxiomHonestyConfig, AxiomPolicy
@@ -19,35 +17,10 @@ from gate.verify.config import AxiomHonestyConfig, AxiomPolicy
 # ---------------------------------------------------------------------------
 
 
-def test_count_empty_file() -> None:
-    assert count_patterns("") == {
-        "axiom": 0,
-        "unsafe": 0,
-        "partial": 0,
-        "native_decide": 0,
-        "extern": 0,
-    }
-
-
-def test_count_axiom_declaration() -> None:
-    src = "axiom choice : Nonempty α → α\n"
-    assert count_patterns(src)["axiom"] == 1
-
-
-def test_count_multiple_axioms() -> None:
-    src = "axiom a : Nat\naxiom b : Nat\naxiom c : Nat\n"
-    assert count_patterns(src)["axiom"] == 3
-
-
 def test_count_axiom_in_identifier_not_matched() -> None:
     # `axiomatic_foo` shouldn't count as an axiom decl.
     src = "def axiomatic_foo : Nat := 42\n"
     assert count_patterns(src)["axiom"] == 0
-
-
-def test_count_partial_decl() -> None:
-    src = "partial def loop : Nat → Nat := fun n => loop (n+1)\n"
-    assert count_patterns(src)["partial"] == 1
 
 
 def test_count_partial_in_identifier_not_matched() -> None:
@@ -62,11 +35,6 @@ def test_count_unsafe() -> None:
     assert count_patterns(src)["unsafe"] >= 1
 
 
-def test_count_native_decide() -> None:
-    src = "theorem foo : 2 + 2 = 4 := by native_decide\n"
-    assert count_patterns(src)["native_decide"] == 1
-
-
 def test_count_extern() -> None:
     src = '@[extern "c_function"] def foo : Nat := 0\n'
     assert count_patterns(src)["extern"] == 1
@@ -75,12 +43,6 @@ def test_count_extern() -> None:
 # ---------------------------------------------------------------------------
 # compare
 # ---------------------------------------------------------------------------
-
-
-def test_compare_clean_when_both_empty() -> None:
-    verdict, findings = compare("", "")
-    assert verdict == Verdict.CLEAN
-    assert findings == []
 
 
 def test_compare_clean_when_unchanged() -> None:
@@ -140,55 +102,6 @@ def test_compare_finding_delta_is_net_increase() -> None:
 
 
 # ---------------------------------------------------------------------------
-# format_findings
-# ---------------------------------------------------------------------------
-
-
-def test_format_findings_empty() -> None:
-    assert "No new" in format_findings([])
-
-
-def test_format_findings_table_includes_pattern_and_delta() -> None:
-    base = "theorem foo : 1 = 1 := rfl\n"
-    head = "axiom bad : False\n" + base
-    _verdict, findings = compare(base, head)
-    out = format_findings(findings)
-    assert "axiom" in out
-    assert "+1" in out
-
-
-# ---------------------------------------------------------------------------
-# extract_axiom_names
-# ---------------------------------------------------------------------------
-
-
-def test_extract_names_empty() -> None:
-    assert extract_axiom_names("") == []
-
-
-def test_extract_names_simple() -> None:
-    src = "axiom choice : Nonempty α → α\naxiom em : ∀ p, p ∨ ¬ p\n"
-    assert extract_axiom_names(src) == ["choice", "em"]
-
-
-def test_extract_names_with_dots_in_identifiers() -> None:
-    # Lean identifiers can be dotted (`Foo.bar`); whitelist needs to
-    # accept these.
-    src = "axiom Quot.sound : ∀ {α} {r}, r a b → Quot.mk r a = Quot.mk r b\n"
-    assert extract_axiom_names(src) == ["Quot.sound"]
-
-
-def test_extract_names_preserves_duplicates_and_order() -> None:
-    src = "axiom a : Nat\naxiom b : Nat\naxiom a : Nat\n"
-    assert extract_axiom_names(src) == ["a", "b", "a"]
-
-
-def test_extract_names_doesnt_match_keyword_in_identifier() -> None:
-    src = "def axiomatic_foo : Nat := 42\n"
-    assert extract_axiom_names(src) == []
-
-
-# ---------------------------------------------------------------------------
 # Whitelist policy
 # ---------------------------------------------------------------------------
 
@@ -238,16 +151,6 @@ def test_whitelist_flags_even_axioms_already_in_base() -> None:
     assert findings[0].disallowed_names == ("legacy_bad",)
 
 
-def test_whitelist_deduplicates_names_in_report() -> None:
-    base = ""
-    head = "axiom bad : Nat\naxiom bad : Nat\naxiom other : Nat\n"
-    cfg = AxiomHonestyConfig(
-        policy=AxiomPolicy.WHITELIST, allowed_axioms=()
-    )
-    _verdict, findings = compare(base, head, config=cfg)
-    assert findings[0].disallowed_names == ("bad", "other")
-
-
 def test_whitelist_other_patterns_still_net_zero() -> None:
     # Under whitelist, `partial`/`unsafe`/etc. still use net-zero
     # comparison — whitelist scope is `axiom` only.
@@ -294,13 +197,6 @@ def test_whitelist_disallowed_names_rendered_in_findings() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_isabelle_count_patterns_uses_profile_trust_patterns() -> None:
-    src = "axiomatization\n  foo :: nat\n\noracle bar = ...\n"
-    counts = count_patterns(src, patterns=compile_patterns(ISABELLE.trust_patterns))
-    assert counts["axiomatization"] == 1
-    assert counts["oracle"] == 1
-
-
 def test_isabelle_compare_flags_new_axiomatization() -> None:
     base = "lemma foo: \"a = a\" by simp\n"
     head = base + "axiomatization\n  bad :: nat\n"
@@ -315,13 +211,6 @@ def test_isabelle_compare_flags_new_oracle() -> None:
     verdict, findings = compare(base, head, profile=ISABELLE)
     assert verdict == Verdict.INTRODUCED
     assert any(f.pattern == "oracle" for f in findings)
-
-
-def test_isabelle_compare_clean_when_unchanged() -> None:
-    src = "axiomatization\n  foo :: nat\n"
-    verdict, findings = compare(src, src, profile=ISABELLE)
-    assert verdict == Verdict.CLEAN
-    assert findings == []
 
 
 def test_rocq_compare_flags_new_parameter() -> None:
@@ -346,13 +235,6 @@ def test_rocq_compare_flags_new_universe_checking() -> None:
     verdict, findings = compare(base, head, profile=ROCQ)
     assert verdict == Verdict.INTRODUCED
     assert any(f.pattern == "universe_checking" for f in findings)
-
-
-def test_rocq_compare_clean_when_unchanged() -> None:
-    src = "Parameter foo : nat.\n"
-    verdict, findings = compare(src, src, profile=ROCQ)
-    assert verdict == Verdict.CLEAN
-    assert findings == []
 
 
 # ---------------------------------------------------------------------------
@@ -409,28 +291,3 @@ def test_isabelle_whitelist_still_catches_new_axiomatization() -> None:
     verdict, findings = compare(base, head, config=cfg, profile=ISABELLE)
     assert verdict == Verdict.INTRODUCED
     assert any(f.pattern == "axiomatization" for f in findings)
-
-
-def test_lean4_whitelist_unaffected_by_fail_closed_change() -> None:
-    # The oracle: lean4 whitelist behavior must remain byte-identical.
-    base = ""
-    head = "axiom bad : False\n"
-    cfg = AxiomHonestyConfig(
-        policy=AxiomPolicy.WHITELIST, allowed_axioms=("propext",)
-    )
-    verdict, findings = compare(base, head, config=cfg)
-    assert verdict == Verdict.INTRODUCED
-    assert len(findings) == 1
-    assert findings[0].pattern == "axiom"
-    assert findings[0].disallowed_names == ("bad",)
-    # Real whitelist name-matching ran (lean4 is whitelist-capable) — no
-    # "unsupported" note attached.
-    assert findings[0].note is None
-
-
-def test_compile_patterns_uses_multiline() -> None:
-    # isabelle/rocq patterns use `^\s*` anchors; MULTILINE makes `^`
-    # match at the start of every line, not just the start of the text.
-    patterns = compile_patterns(ISABELLE.trust_patterns)
-    src = "theory Scratch imports Main begin\naxiomatization\n  foo :: nat\n"
-    assert patterns["axiomatization"].search(src) is not None

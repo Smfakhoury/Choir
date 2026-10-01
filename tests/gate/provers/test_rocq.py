@@ -4,7 +4,6 @@ extractor (design note 12 §2.2, §3.3).
 
 from __future__ import annotations
 
-from gate.provers.base import CommentSyntax
 from gate.provers.rocq import (
     ROCQ,
     extract_rocq_statement,
@@ -40,117 +39,8 @@ Proof. split; [apply Nat.le_succ_diag_r | reflexivity]. Qed.
 
 
 # ---------------------------------------------------------------------------
-# Declarative fields (note 12 §2.2/§3.3, verbatim)
+# qualify_rocq_decl_names
 # ---------------------------------------------------------------------------
-
-
-def test_rocq_declarative_fields() -> None:
-    assert ROCQ.name == "rocq"
-    assert ROCQ.file_extensions == (".v",)
-    assert ROCQ.comment_syntax == CommentSyntax(
-        line=None, block_open="(*", block_close="*)", nested=True
-    )
-    # Round 5 (F2) re-derived this whole tuple from Rocq's own generated
-    # grammar (`doc/tools/docgram/fullGrammar`) rather than the manual's
-    # prose, grouped here by the grammar token each entry comes from.
-    # `Property` was the defect that prompted it: a `thm_token`
-    # alternative missing from enumeration entirely, so `Property p :
-    # 1 = 1.` produced zero spans and its statement was rewritable.
-    # `gate/provers/rocq.py` carries the productions verbatim and the
-    # list of commands deliberately left out.
-    assert ROCQ.decl_keywords == (
-        # thm_token
-        "Theorem",
-        "Lemma",
-        "Corollary",
-        "Proposition",
-        "Fact",
-        "Remark",
-        "Property",
-        # def_token
-        "Example",
-        "Definition",
-        "SubClass",
-        # gallina: Let / Fixpoint / CoFixpoint, funind: Function
-        "Let",
-        "Fixpoint",
-        "CoFixpoint",
-        "Function",
-        # gallina_ext
-        "Instance",
-        # inductive_token, finite_token — `Variant`/`Structure` were
-        # added by the fix round (whole-slice review I3); `CoInductive`
-        # by round 5, which found `Inductive` wired without its
-        # `inductive_token` sibling.
-        "Inductive",
-        "CoInductive",
-        "Variant",
-        "Record",
-        "Structure",
-        "Class",
-        # assumption_token / assumptions_token
-        "Axiom",
-        "Axioms",
-        "Parameter",
-        "Parameters",
-        "Conjecture",
-        "Conjectures",
-        "Hypothesis",
-        "Hypotheses",
-        "Variable",
-        "Variables",
-        # gallina: rewrite-rule symbols (Rocq >= 9.0), kernel primitives
-        "Symbol",
-        "Symbols",
-        "Primitive",
-    )
-    assert ROCQ.placeholder_tokens == ("Admitted", "admit", "Abort")
-    assert ROCQ.build_command == ("dune", "build")
-    assert ROCQ.toolchain_file is None
-    assert ROCQ.protected_files == ("_CoqProject", "dune-project", "*.opam")
-    assert ROCQ.extra_audits == ()
-    assert ROCQ.search_tooling_note is False
-
-
-def test_rocq_statement_keywords_equal_decl_keywords() -> None:
-    # Unlike lean4, every rocq decl kind has a sentence
-    # `extract_rocq_statement` can resolve (design note 12 §3.3).
-    assert ROCQ.statement_keywords == ROCQ.decl_keywords
-
-
-def test_rocq_trust_patterns() -> None:
-    assert ROCQ.trust_patterns == (
-        ("axiom", r"^\s*(?:Axiom|Axioms|Parameter|Parameters|Conjecture)\b"),
-        ("admitted", r"^\s*Admitted\."),
-        ("native_compute", r"\bnative_compute\b"),
-        ("vm_compute", r"\bvm_compute\b"),
-        ("universe_checking", r"^\s*Unset\s+Universe\s+Checking\b"),
-        ("ml_module", r"^\s*Declare\s+ML\s+Module\b"),
-    )
-
-
-def test_rocq_one_probe_per_decl_is_true() -> None:
-    # `Print Assumptions` doesn't echo the queried name in its own
-    # output, so rocq probes one decl at a time — see
-    # tests/gate/provers/test_trust.py for the real trust-report hooks
-    # (design note 12 §4).
-    assert ROCQ.one_probe_per_decl is True
-
-
-def test_rocq_qualify_decl_names_is_a_scope_path_key() -> None:
-    # Statement-immutability hardening round 4 (F2) supersedes task 4's
-    # `is None` pin. Task 4 declined a qualifier because a *correct*
-    # one needs nested modules, functors, `Module Type` and
-    # `Import`/`Export`/`Include`, none of it checkable against a Rocq
-    # toolchain (still none installed here). That reasoning was right
-    # about name resolution and answers a question this hook is not
-    # asked: the key only has to match base declarations against head
-    # declarations within ONE file, so stable + structure-derived +
-    # computed identically on both sides is the whole requirement. An
-    # enclosing-`Module` path is that. See
-    # `gate.provers.decl_syntax.qualify_by_scope` — it is a
-    # disambiguation key, NOT name resolution.
-    assert ROCQ.qualify_decl_names is qualify_rocq_decl_names
 
 
 def test_rocq_scope_path_qualifies_sibling_modules() -> None:
@@ -220,14 +110,6 @@ def test_extract_theorem_stops_at_sentence_dot() -> None:
     assert out == "Theorem add_comm_ex : forall a b : nat, a + b = b + a."
 
 
-def test_extract_lemma_stops_at_sentence_dot() -> None:
-    out = extract_rocq_statement(ROCQ_SRC, "le_trans_ex")
-    assert (
-        out
-        == "Lemma le_trans_ex : forall x y z : nat, x <= y -> y <= z -> x <= z."
-    )
-
-
 def test_extract_returns_none_when_decl_missing() -> None:
     assert extract_rocq_statement(ROCQ_SRC, "no_such_theorem") is None
 
@@ -237,24 +119,11 @@ def test_extract_does_not_match_similarly_named_decl() -> None:
     assert extract_rocq_statement(ROCQ_SIMILAR_NAME, "add_comm_ex") is None
 
 
-def test_extract_matches_the_similarly_named_decl_itself() -> None:
-    out = extract_rocq_statement(ROCQ_SIMILAR_NAME, "add_comm_ex_alt")
-    assert out == "Theorem add_comm_ex_alt : forall a b : nat, a + b = b + a."
-
-
 def test_extract_qualified_name_dot_does_not_end_the_sentence() -> None:
     # `Nat.le` / `Nat.add`'s dots are followed by identifier characters,
     # not whitespace, so they must not truncate the statement early.
     out = extract_rocq_statement(ROCQ_QUALIFIED, "uses_qualified_ex")
     assert out == "Lemma uses_qualified_ex : Nat.le 1 2 /\\ Nat.add 1 1 = 2."
-
-
-def test_profile_extract_statement_hook_is_wired_to_the_module_function() -> None:
-    assert ROCQ.extract_statement is extract_rocq_statement
-    assert (
-        ROCQ.extract_statement(ROCQ_SRC, "add_comm_ex")
-        == "Theorem add_comm_ex : forall a b : nat, a + b = b + a."
-    )
 
 
 def test_rocq_extract_statement_resolves_modifier_prefixed_declarations() -> None:

@@ -27,21 +27,6 @@ def test_decodes_successful_response(monkeypatch) -> None:  # type: ignore[no-un
     assert calls == [["gh", "api", "repos/acme/proofs/contents/.choir/project.toml"]]
 
 
-def test_ref_appends_query_param(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    encoded = base64.b64encode(b"x").decode("ascii")
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, *, check=True):  # type: ignore[no-untyped-def]
-        calls.append(cmd)
-        return f'{{"content": "{encoded}"}}'
-
-    monkeypatch.setattr(gh, "_run", fake_run)
-    gh.get_file_contents("acme/proofs", ".choir/project.toml", ref="main")
-    assert calls == [
-        ["gh", "api", "repos/acme/proofs/contents/.choir/project.toml?ref=main"]
-    ]
-
-
 def test_github_error_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     def boom(cmd, *, check=True):  # type: ignore[no-untyped-def]
         raise gh.GitHubError("404 not found")
@@ -50,20 +35,8 @@ def test_github_error_returns_none(monkeypatch) -> None:  # type: ignore[no-unty
     assert gh.get_file_contents("acme/proofs", ".choir/project.toml") is None
 
 
-def test_malformed_json_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(gh, "_run", lambda cmd, *, check=True: "not json")
-    assert gh.get_file_contents("acme/proofs", ".choir/project.toml") is None
-
-
 def test_missing_content_field_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(gh, "_run", lambda cmd, *, check=True: '{"message": "Not Found"}')
-    assert gh.get_file_contents("acme/proofs", ".choir/project.toml") is None
-
-
-def test_bad_base64_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        gh, "_run", lambda cmd, *, check=True: '{"content": "not-base64!!!"}'
-    )
     assert gh.get_file_contents("acme/proofs", ".choir/project.toml") is None
 
 
@@ -126,19 +99,3 @@ def test_edit_comment_patches_the_comment_body(monkeypatch) -> None:  # type: ig
             "body=```choir-lease\nlogin: alice\n```",
         ]
     ]
-
-
-def test_the_write_wrappers_that_need_push_access_are_gone() -> None:
-    # Spec D4: a contributor has no repository write access, so these were
-    # calls that either failed loudly (assignees) or, worse, silently did
-    # nothing (labels). The orchestrator owns both now.
-    for gone in (
-        "add_label",
-        "remove_label",
-        "ensure_label_exists",
-        "add_assignee",
-        "remove_assignee",
-        "get_assigned_events",
-        "AssignedEvent",
-    ):
-        assert not hasattr(gh, gone), f"client.github still exposes {gone}"

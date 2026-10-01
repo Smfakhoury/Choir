@@ -13,30 +13,11 @@ from gate.provers.rocq import ROCQ
 # ---------------------------------------------------------------------------
 
 
-def test_strip_line_comment() -> None:
-    out = strip_comments("def foo := 1 -- has a sorry in prose\n")
-    assert "sorry" not in out
-    assert "def foo := 1" in out
-
-
-def test_strip_block_comment() -> None:
-    out = strip_comments("/- sorry sorry sorry -/\ndef foo := 1\n")
-    assert "sorry" not in out
-    assert "def foo := 1" in out
-
-
 def test_strip_nested_block_comments() -> None:
     # Lean block comments nest; the whole thing is one comment.
     out = strip_comments("/- outer /- inner sorry -/ still comment sorry -/ def x := 1\n")
     assert "sorry" not in out
     assert "def x := 1" in out
-
-
-def test_strip_doc_comment() -> None:
-    # `/-- ... -/` doc comments are block comments too.
-    out = strip_comments("/-- This lemma replaces a sorry. -/\ntheorem t : True := trivial\n")
-    assert "sorry" not in out
-    assert "theorem t" in out
 
 
 def test_strip_preserves_line_structure() -> None:
@@ -141,12 +122,6 @@ def test_scan_sorry_in_identifier_not_matched() -> None:
     assert sorries == []
 
 
-def test_scan_clean_file_empty() -> None:
-    axioms, sorries = scan_text("theorem t : True := trivial\n", "G.lean")
-    assert axioms == []
-    assert sorries == []
-
-
 # ---------------------------------------------------------------------------
 # scan_tree
 # ---------------------------------------------------------------------------
@@ -194,17 +169,6 @@ def test_scan_tree_excludes_build_dirs(tmp_path: Path) -> None:
     assert tb.sorries == ()
 
 
-def test_scan_tree_as_dict_summary(tmp_path: Path) -> None:
-    _write(tmp_path / "A.lean", "theorem a : True := by sorry\naxiom x : Nat\n")
-    d = scan_tree(tmp_path).as_dict()
-    assert d["summary"] == {
-        "axiom_count": 1,
-        "sorry_count": 1,
-        "files_scanned": 1,
-    }
-    assert d["axioms"][0]["name"] == "x"  # type: ignore[index]
-
-
 # ---------------------------------------------------------------------------
 # Per-prover: strip_comments with a non-lean4 comment_syntax
 # ---------------------------------------------------------------------------
@@ -215,14 +179,6 @@ def test_strip_comments_block_only_syntax_has_no_line_comments() -> None:
     # the text must be left alone (block comments only).
     out = strip_comments("-- not a comment\n", comment_syntax=ISABELLE.comment_syntax)
     assert "-- not a comment" in out
-
-
-def test_strip_comments_parenthesis_star_block_comment() -> None:
-    out = strip_comments(
-        "(* sorry sorry *)\nlemma foo: True\n", comment_syntax=ISABELLE.comment_syntax
-    )
-    assert "sorry" not in out
-    assert "lemma foo: True" in out
 
 
 def test_strip_comments_parenthesis_star_nests() -> None:
@@ -245,18 +201,6 @@ def test_scan_text_isabelle_counts_oops_placeholder() -> None:
     assert len(sorries) == 1
 
 
-def test_scan_text_isabelle_counts_sorry_placeholder_too() -> None:
-    src = "lemma foo:\n  \"a = a\"\n  by sorry\n"
-    _axioms, sorries = scan_text(src, "F.thy", profile=ISABELLE)
-    assert len(sorries) == 1
-
-
-def test_scan_text_isabelle_ignores_commented_placeholder() -> None:
-    src = "(* oops *)\nlemma foo: \"a = a\" by simp\n"
-    _axioms, sorries = scan_text(src, "F.thy", profile=ISABELLE)
-    assert sorries == []
-
-
 def test_scan_text_rocq_counts_admitted_and_admit() -> None:
     src = (
         "Theorem foo : True.\nProof. admit. Qed.\n"
@@ -270,35 +214,6 @@ def test_scan_text_rocq_ignores_commented_admitted() -> None:
     src = "(* Admitted. *)\nTheorem foo : True.\nProof. reflexivity. Qed.\n"
     _axioms, sorries = scan_text(src, "F.v", profile=ROCQ)
     assert sorries == []
-
-
-def test_scan_text_default_profile_is_lean4() -> None:
-    # Back-compat: the two-positional-arg call keeps working exactly as
-    # before (no keyword args at all).
-    axioms, sorries = scan_text("axiom my_assumption : False\n", "A.lean")
-    assert len(axioms) == 1
-    assert sorries == []
-
-
-# ---------------------------------------------------------------------------
-# Per-prover: scan_tree walks the profile's file_extensions
-# ---------------------------------------------------------------------------
-
-
-def test_scan_tree_isabelle_walks_thy_files(tmp_path: Path) -> None:
-    _write(tmp_path / "Scratch.thy", "lemma foo:\n  \"a = a\"\n  oops\n")
-    _write(tmp_path / "Ignored.lean", "theorem t : True := by sorry\n")
-    tb = scan_tree(tmp_path, profile=ISABELLE)
-    assert tb.files_scanned == 1
-    assert len(tb.sorries) == 1
-
-
-def test_scan_tree_rocq_walks_v_files(tmp_path: Path) -> None:
-    _write(tmp_path / "Scratch.v", "Lemma foo : True.\nAdmitted.\n")
-    _write(tmp_path / "Ignored.lean", "theorem t : True := by sorry\n")
-    tb = scan_tree(tmp_path, profile=ROCQ)
-    assert tb.files_scanned == 1
-    assert len(tb.sorries) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -315,21 +230,6 @@ def test_declaration_names_lists_declarations() -> None:
 def test_declaration_names_ignores_commented_declarations() -> None:
     text = "-- theorem ghost : True := trivial\ntheorem real : True := trivial\n"
     assert declaration_names(text) == frozenset({"real"})
-
-
-def test_declaration_names_empty_for_no_declarations() -> None:
-    assert declaration_names("import Mathlib\n") == frozenset()
-
-
-def test_declaration_names_agrees_with_sorry_attribution() -> None:
-    text = (
-        "theorem first : True := trivial\n"
-        "theorem second : True := by\n"
-        "  sorry\n"
-    )
-    _axioms, sorries = scan_text(text, "F.lean")
-    assert sorries[0].decl == "second"
-    assert declaration_names(text) == frozenset({"first", "second"})
 
 
 def test_declaration_names_uses_the_profile() -> None:

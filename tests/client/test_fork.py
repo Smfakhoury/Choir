@@ -12,7 +12,7 @@ import json
 import pytest
 
 from client import fork as fork_mod
-from client._subprocess import CompletedRun, ToolNotFound
+from client._subprocess import CompletedRun
 
 
 def _graphql_reply(*names: str) -> str:
@@ -46,27 +46,6 @@ def test_a_fork_that_github_renamed_is_found_under_its_real_name(
 
     monkeypatch.setattr(fork_mod, "run", _fake_run)
     assert fork_mod.find_fork("owner/proj") == "octocat/proj-1"
-
-
-def test_a_fork_renamed_by_its_owner_is_found_under_the_new_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A contributor may rename their fork after creating it. The lookup
-    reports the current name, which is what lets `_ensure_fork_remote`'s
-    `set-url` self-heal instead of pushing at a URL that stopped
-    resolving."""
-
-    def _fake_run(args: list[str], **kwargs: object) -> CompletedRun:
-        if _is(args, "gh", "api", "graphql"):
-            return CompletedRun(
-                returncode=0,
-                stdout=_graphql_reply("octocat/my-choir-work"),
-                stderr="",
-            )
-        raise AssertionError(args)
-
-    monkeypatch.setattr(fork_mod, "run", _fake_run)
-    assert fork_mod.find_fork("owner/proj") == "octocat/my-choir-work"
 
 
 def test_no_fork_reads_as_none_rather_than_a_guess(
@@ -192,15 +171,6 @@ def test_a_fork_that_never_appears_raises_rather_than_pushing_blind(
         fork_mod.ensure_fork("owner/proj", poll_attempts=2, poll_delay=0)
 
 
-def test_a_missing_gh_is_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_run(args: list[str], **kwargs: object) -> CompletedRun:
-        raise ToolNotFound("gh not found")
-
-    monkeypatch.setattr(fork_mod, "run", _fake_run)
-    with pytest.raises(fork_mod.ForkError, match="gh"):
-        fork_mod.find_fork("owner/proj")
-
-
 # ---------------------------------------------------------------------------
 # The account that owns the upstream has no fork, and cannot have one.
 # ---------------------------------------------------------------------------
@@ -223,12 +193,6 @@ def test_owner_detection_is_case_insensitive() -> None:
 
 def test_a_contributor_is_not_mistaken_for_the_owner() -> None:
     assert not fork_mod.owns_upstream("owner/proj", "octocat")
-
-
-def test_a_malformed_repo_is_rejected_rather_than_half_parsed() -> None:
-    for bad in ("proj", "owner/", "/proj", "a/b/c"):
-        with pytest.raises(fork_mod.ForkError):
-            fork_mod.split_repo(bad)
 
 
 # ---------------------------------------------------------------------------

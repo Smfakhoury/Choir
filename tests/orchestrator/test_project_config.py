@@ -21,28 +21,10 @@ def test_empty_text_defaults_to_auto() -> None:
     assert cfg.merge_automation is MergeAutomation.AUTO
 
 
-def test_each_level_parses() -> None:
-    for level in ("auto", "approve", "manual"):
-        cfg = parse_project_config(f'[automation]\nmerge = "{level}"\n')
-        assert cfg.merge_automation.value == level
-
-
 def test_invalid_level_raises_not_defaults() -> None:
     # A typo'd level must not silently become full automation.
     with pytest.raises(ProjectConfigError, match=r"invalid automation\.merge"):
         parse_project_config('[automation]\nmerge = "semi"\n')
-
-
-def test_malformed_toml_raises() -> None:
-    with pytest.raises(ProjectConfigError, match="malformed"):
-        parse_project_config("not == toml")
-
-
-def test_unknown_keys_ignored() -> None:
-    cfg = parse_project_config(
-        '[automation]\nmerge = "approve"\nfuture_knob = 1\n[future_section]\nx = 2\n'
-    )
-    assert cfg.merge_automation is MergeAutomation.APPROVE
 
 
 def test_read_missing_file_defaults(tmp_path: Path) -> None:

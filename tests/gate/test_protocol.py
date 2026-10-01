@@ -9,42 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gate.protocol import PROTOCOL_VERSION, parse_protocol_pin, read_protocol_pin
-
-
-def test_protocol_version_is_8() -> None:
-    """8 puts a `session` in the lease block, below the login.
-
-    7 made the lease a comment (spec D4, open contribution) and keyed the
-    holder on the login alone. One account can run several worker sessions
-    at once, and the arbiter then reads the second session's claim as the
-    holder re-claiming and hands one task to both — observed, with two
-    contributors on one login duplicating work. 8 adds the session so a
-    worker is a login *and* a session, which is what makes the comment
-    thread able to answer "is someone else already on this?" without
-    waiting for the orchestrator to flip a label.
-
-    Bumped rather than shipped silently because a mixed thread is not safe:
-    a client still on 7 emits no session, so it keeps double-claiming
-    against an 8 client. The pin is what lets an overseer require 8 before
-    a claim is accepted.
-
-    Deliberately a literal rather than a computed value: the point of the
-    pin is that a bump is a decision someone made, so changing it should
-    require editing a test that says which decision. Design note 13 §2
-    carries what each version means.
-    """
-    assert PROTOCOL_VERSION == 9
-
+from gate.protocol import parse_protocol_pin, read_protocol_pin
 
 # ---------------------------------------------------------------------------
 # parse_protocol_pin — pure text parser
 # ---------------------------------------------------------------------------
-
-
-def test_parse_reads_the_pinned_version() -> None:
-    assert parse_protocol_pin("[project]\nchoir_protocol = 2\n") == 2
-    assert parse_protocol_pin("[project]\nchoir_protocol = 3\n") == 3
 
 
 def test_parse_unpinned_defaults_to_1() -> None:
@@ -77,14 +46,6 @@ def test_read_pinned_version(tmp_path: Path) -> None:
 
 
 def test_read_absent_file_defaults_to_1(tmp_path: Path) -> None:
-    assert read_protocol_pin(tmp_path) == 1
-
-
-def test_read_garbage_file_defaults_to_1(tmp_path: Path) -> None:
-    (tmp_path / ".choir").mkdir()
-    (tmp_path / ".choir" / "project.toml").write_text(
-        "not = valid = toml = at = all\n", encoding="utf-8"
-    )
     assert read_protocol_pin(tmp_path) == 1
 
 

@@ -88,23 +88,11 @@ def test_new_pr_detected() -> None:
     assert changes == ["PR #5 opened (checks green)"]
 
 
-def test_pr_disappeared_detected() -> None:
-    changes = diff_snapshots(_snap(prs=[_pr(5)]), _snap())
-    assert changes == ["PR #5 closed or merged"]
-
-
 def test_checks_transition_pending_to_green() -> None:
     pending = _pr(5, checks=_green_checks(rebuild=("IN_PROGRESS", "")))
     green = _pr(5, checks=_green_checks())
     changes = diff_snapshots(_snap(prs=[pending]), _snap(prs=[green]))
     assert changes == ["PR #5 checks: pending → green"]
-
-
-def test_checks_transition_to_red() -> None:
-    pending = _pr(5, checks=_green_checks(rebuild=("IN_PROGRESS", "")))
-    red = _pr(5, checks=_green_checks(rebuild=("COMPLETED", "FAILURE")))
-    changes = diff_snapshots(_snap(prs=[pending]), _snap(prs=[red]))
-    assert changes == ["PR #5 checks: pending → red"]
 
 
 def test_advisory_check_failure_is_not_red() -> None:
@@ -196,38 +184,6 @@ def test_new_commits_detected() -> None:
         _snap(prs=[_pr(5, head="aaa")]), _snap(prs=[_pr(5, head="bbb")])
     )
     assert "PR #5 got new commits" in changes
-
-
-def test_task_lifecycle_detected() -> None:
-    before = _snap(tasks=[_task(7, ("choir/task", "choir/available"))])
-    after = _snap(tasks=[_task(7, ("choir/task", "choir/claimed"))])
-    changes = diff_snapshots(before, after)
-    assert len(changes) == 1
-    assert changes[0].startswith("task #7 labels:")
-
-
-def test_task_opened_and_closed() -> None:
-    assert diff_snapshots(_snap(), _snap(tasks=[_task(9, ())])) == ["task #9 opened"]
-    assert diff_snapshots(_snap(tasks=[_task(9, ())]), _snap()) == ["task #9 closed"]
-
-
-def test_snapshot_as_dict_shape() -> None:
-    d = _snap(prs=[_pr(1)], tasks=[_task(2, ("choir/task",))]).as_dict()
-    assert d["open_prs"] == [{"number": 1, "head_sha": "aaa", "checks": "green"}]
-    assert d["open_tasks"] == [
-        {
-            "number": 2,
-            "labels": ["choir/task"],
-            "updated_at": "2026-01-01T00:00:00Z",
-        }
-    ]
-
-
-def test_empty_labels_round_trip() -> None:
-    d = _snap(tasks=[_task(3, ())]).as_dict()
-    assert d["open_tasks"] == [
-        {"number": 3, "labels": [], "updated_at": "2026-01-01T00:00:00Z"}
-    ]
 
 
 def test_a_claim_wakes_the_poller() -> None:

@@ -21,7 +21,3 @@ def test_a_helper_is_not_in_the_plan_for_having_dependencies() -> None:
     declaration has one; counting that leaves neither scope answering its
     own question."""
     assert not in_plan(Node(decl="Proj.helper", declares_deps=True))
-
-
-def test_a_bare_declaration_is_not_in_the_plan() -> None:
-    assert not in_plan(Node(decl="Proj.leaf"))

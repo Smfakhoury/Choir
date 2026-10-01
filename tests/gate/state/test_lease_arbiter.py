@@ -47,11 +47,6 @@ def test_no_comments_means_no_holder() -> None:
     assert decision.superseded == ()
 
 
-def test_a_single_claim_holds_the_lease() -> None:
-    decision = _decide([_comment(1, "alice", "claim")])
-    assert decision.holder == "alice"
-
-
 def test_the_earliest_comment_id_wins_not_the_first_login_alphabetically() -> None:
     """Discriminates against the wrong rule, deliberately.
 

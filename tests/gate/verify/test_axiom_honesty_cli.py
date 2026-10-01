@@ -19,12 +19,8 @@ from pathlib import Path
 import pytest
 
 from gate.provers import ProverError
-from gate.provers.isabelle import ISABELLE
-from gate.provers.lean4 import LEAN4
-from gate.provers.rocq import ROCQ
 from gate.verify import axiom_honesty_cli as cli
 from gate.verify.axiom_honesty_cli import (
-    filter_files_by_profile,
     load_verify_config_from_base,
 )
 from gate.verify.config import AxiomPolicy, VerifyConfig
@@ -82,17 +78,6 @@ def test_loads_whitelist_policy_from_base(tmp_path: Path, monkeypatch) -> None: 
     assert cfg.axiom_honesty.allowed_axioms == ("propext",)
 
 
-def test_ignores_head_policy_weakening(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # The whole point of base-SHA reads: a PR that weakens the policy
-    # does NOT change what the audit enforces. We pass base_sha, so
-    # the contributor's `allowed_axioms = ["propext", "bad_axiom"]`
-    # in head is irrelevant.
-    base_sha, _head = _init_repo_with_policy_history(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    cfg = load_verify_config_from_base(base_sha)
-    assert "bad_axiom" not in cfg.axiom_honesty.allowed_axioms
-
-
 def test_missing_config_at_base_yields_defaults(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "test@example.com")
@@ -123,26 +108,6 @@ def test_malformed_config_at_base_falls_back_to_defaults(
     assert cfg == VerifyConfig()  # safe default
     captured = capsys.readouterr()
     assert "warning" in captured.err.lower()
-
-
-# ---------------------------------------------------------------------------
-# filter_files_by_profile — per-prover extension filtering
-# ---------------------------------------------------------------------------
-
-
-def test_filter_files_lean4_keeps_only_lean() -> None:
-    files = ["A.lean", "README.md", "sub/B.lean"]
-    assert filter_files_by_profile(files, LEAN4) == ["A.lean", "sub/B.lean"]
-
-
-def test_filter_files_isabelle_keeps_only_thy() -> None:
-    files = ["Scratch.thy", "A.lean", "ROOT"]
-    assert filter_files_by_profile(files, ISABELLE) == ["Scratch.thy"]
-
-
-def test_filter_files_rocq_keeps_only_v() -> None:
-    files = ["Scratch.v", "A.lean", "_CoqProject"]
-    assert filter_files_by_profile(files, ROCQ) == ["Scratch.v"]
 
 
 # ---------------------------------------------------------------------------

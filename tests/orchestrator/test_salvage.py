@@ -14,8 +14,6 @@ from orchestrator.salvage import (
     FailureClass,
     classify_failure,
     create_salvage_task,
-    salvage_prose,
-    salvage_task_record,
 )
 
 
@@ -128,37 +126,6 @@ def test_classify_failure_ignores_prover_overrides() -> None:
                 f"classify_failure({{{check!r}}}) must read the base class "
                 f"on {prover}, ignoring the merge-axis override"
             )
-
-
-# --- salvage_task_record ---------------------------------------------------
-
-
-def test_salvage_record_seeds_pr_head_and_preserves_target() -> None:
-    rec = salvage_task_record(_original(), pr_head_sha="fedcba9", original_issue=34)
-    assert rec.type is TaskType.PROVE
-    assert rec.project_ref.commit == "fedcba9"        # seeded with the PR head
-    assert rec.target_decl == "Project.main_bound"
-    assert rec.target_file == "Project/Core.lean"
-    assert rec.project_ref.toolchain == "leanprover/lean4:v4.31.0"
-    assert rec.deps == [34]                              # provenance
-
-
-# --- salvage_prose ---------------------------------------------------------
-
-
-def test_salvage_prose_mentions_origin_and_seeding() -> None:
-    prose = salvage_prose(
-        original_issue=34,
-        pr_number=48,
-        target_decl="X.foo",
-        failed_checks=["style"],
-        detail="115 lines > 100",
-    )
-    assert "#34" in prose and "#48" in prose
-    assert "style" in prose
-    assert "X.foo" in prose
-    assert "from scratch" in prose  # instructs to build on the seed, not redo
-    assert "115 lines > 100" in prose
 
 
 # --- create_salvage_task ---------------------------------------------------

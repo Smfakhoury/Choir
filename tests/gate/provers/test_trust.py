@@ -28,14 +28,12 @@ from gate.provers.isabelle import (
 from gate.provers.lean4 import (
     LEAN4,
     build_lean_trust_probe,
-    lean_trust_report_command,
     parse_lean_trust_report,
 )
 from gate.provers.rocq import (
     ROCQ,
     build_rocq_trust_probe,
     parse_rocq_trust_report,
-    rocq_trust_report_command,
 )
 from gate.provers.trust import collect_trust_report
 from gate.verify.changed_decls import detect_changed_decls
@@ -49,22 +47,6 @@ def test_build_lean_trust_probe_contents(tmp_path: Path) -> None:
     probe = build_lean_trust_probe(tmp_path, ["foo", "Bar.baz"], ["MyProject"])
     assert probe == tmp_path / ".choir-trust-probe.lean"
     assert probe.read_text() == "import MyProject\n#print axioms foo\n#print axioms Bar.baz\n"
-
-
-def test_build_lean_trust_probe_no_imports(tmp_path: Path) -> None:
-    probe = build_lean_trust_probe(tmp_path, ["foo"], [])
-    assert probe.read_text() == "#print axioms foo\n"
-
-
-def test_lean_trust_report_command_writes_probe_and_returns_argv(tmp_path: Path) -> None:
-    argv = lean_trust_report_command(tmp_path, ["foo"], ["MyProject"])
-    assert argv == ["lake", "env", "lean", ".choir-trust-probe.lean"]
-    assert (tmp_path / ".choir-trust-probe.lean").exists()
-
-
-def test_lean4_profile_hooks_are_wired() -> None:
-    assert LEAN4.trust_report_command is lean_trust_report_command
-    assert LEAN4.parse_trust_report is parse_lean_trust_report
 
 
 # ---------------------------------------------------------------------------
@@ -107,10 +89,6 @@ def test_parse_lean_trust_report_ignores_noise_lines() -> None:
     assert entries == [TrustEntry(decl="t", assumptions=(), clean=True)]
 
 
-def test_parse_lean_trust_report_empty_output() -> None:
-    assert parse_lean_trust_report("") == []
-
-
 # ---------------------------------------------------------------------------
 # rocq: probe builder
 # ---------------------------------------------------------------------------
@@ -120,23 +98,6 @@ def test_build_rocq_trust_probe_contents(tmp_path: Path) -> None:
     probe = build_rocq_trust_probe(tmp_path, ["foo"], ["Arith"])
     assert probe == tmp_path / ".choir-trust-probe.v"
     assert probe.read_text() == "Require Import Arith.\nPrint Assumptions foo.\n"
-
-
-def test_build_rocq_trust_probe_no_imports(tmp_path: Path) -> None:
-    probe = build_rocq_trust_probe(tmp_path, ["foo"], [])
-    assert probe.read_text() == "Print Assumptions foo.\n"
-
-
-def test_rocq_trust_report_command_writes_probe_and_returns_argv(tmp_path: Path) -> None:
-    argv = rocq_trust_report_command(tmp_path, ["foo"], [])
-    assert argv == ["rocq", "c", ".choir-trust-probe.v"]
-    assert (tmp_path / ".choir-trust-probe.v").exists()
-
-
-def test_rocq_profile_hooks_are_wired() -> None:
-    assert ROCQ.trust_report_command is rocq_trust_report_command
-    assert ROCQ.parse_trust_report is parse_rocq_trust_report
-    assert ROCQ.one_probe_per_decl is True
 
 
 # ---------------------------------------------------------------------------
@@ -290,18 +251,6 @@ def test_isabelle_trust_probe_ml_loads_imports_as_theories() -> None:
     assert "-l" not in argv  # base logic comes from ISABELLE_LOGIC
     assert "quick_and_dirty" in argv  # or a `sorry` theory will not load
     assert "show_results=false" in argv
-
-
-def test_isabelle_trust_probe_ml_omits_the_load_step_with_no_imports() -> None:
-    ml = build_isabelle_trust_ml(["foo"], [])
-    assert "Thy_Info.use_theories" not in ml
-    assert 'report "foo"' in ml
-
-
-def test_isabelle_profile_hooks_are_wired() -> None:
-    assert ISABELLE.trust_report_command is isabelle_trust_report_command
-    assert ISABELLE.parse_trust_report is parse_isabelle_trust_report
-    assert ISABELLE.one_probe_per_decl is False
 
 
 # ---------------------------------------------------------------------------

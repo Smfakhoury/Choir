@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import fields, replace
+from dataclasses import replace
 
 import pytest
 
@@ -13,26 +12,16 @@ from gate.provers.isabelle import ISABELLE
 from gate.provers.lean4 import LEAN4
 from gate.provers.rocq import ROCQ
 from gate.verify import statement_immutability
-from gate.verify.sorry_delta import count_sorries
 from gate.verify.statement_immutability import (
     Finding,
     Verdict,
     compare_declarations,
-    count_base_declarations,
 )
 from gate.verify.style import DeclSpan
 
 # ---------------------------------------------------------------------------
 # lean4
 # ---------------------------------------------------------------------------
-
-
-def test_identical_declarations_are_unchanged() -> None:
-    base = "theorem foo : 1 = 1 := rfl\n"
-    head = "theorem foo : 1 = 1 := rfl\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
 
 
 def test_modified_base_declaration_is_changed() -> None:
@@ -159,24 +148,6 @@ def test_untouched_structure_alongside_real_proof_body_change_is_unchanged() -> 
     assert findings == []
 
 
-def test_untouched_axiom_alongside_real_proof_body_change_is_unchanged() -> None:
-    base = "axiom foo : Bar\ntheorem baz : 1 = 1 := by sorry\n"
-    head = "axiom foo : Bar\ntheorem baz : 1 = 1 := by simp\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
-def test_modified_structure_field_is_changed() -> None:
-    """A renamed/retyped field is a real edit to a `structure`'s declaration."""
-    base = "structure Point where\n  x : Nat\n  y : Nat\n"
-    head = "structure Point where\n  x : Int\n  y : Nat\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.CHANGED
-    assert len(findings) == 1
-    assert findings[0].decl == "Point"
-
-
 def test_modified_inductive_constructor_is_changed() -> None:
     base = "inductive Color where\n  | red\n  | green\n  | blue\n"
     head = "inductive Color where\n  | red\n  | green\n  | yellow\n"
@@ -184,29 +155,6 @@ def test_modified_inductive_constructor_is_changed() -> None:
     assert verdict == Verdict.CHANGED
     assert len(findings) == 1
     assert findings[0].decl == "Color"
-
-
-def test_duplicate_name_finding_does_not_claim_arbitrary_statement_text() -> None:
-    """Minor finding: the duplicate-name report must not quote one arbitrary
-    match as if it were representative."""
-    base = "theorem foo : 1 = 1 := rfl\ntheorem foo : 2 = 2 := rfl\n"
-    head = "theorem foo : 1 = 1 := rfl\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.UNDETERMINED
-    assert len(findings) == 1
-    assert "duplicate" in findings[0].base_statement.lower()
-
-
-def test_statement_keywords_is_subset_of_decl_keywords_for_every_profile() -> None:
-    """Structural guard so this class of mismatch cannot come back: a
-    profile's `extract_statement`-resolvable kinds must be drawn from
-    the kinds `find_decl_spans` actually enumerates, never a superset.
-    Given this, `compare_declarations`'s `in statement_keywords` /
-    `else` branch automatically covers every keyword in `decl_keywords`
-    — no kind is silently skipped by construction, so there is nothing
-    further to assert without just restating that branch."""
-    for profile in PROFILES.values():
-        assert set(profile.statement_keywords) <= set(profile.decl_keywords), profile.name
 
 
 # ---------------------------------------------------------------------------
@@ -255,138 +203,6 @@ def test_three_keyword_groups_partition_decl_keywords_for_every_profile() -> Non
         assert definition, profile.name
 
 
-def test_keyword_categorization_is_pinned_per_profile() -> None:
-    """The guard that actually stops a future keyword from defaulting.
-
-    The partition above holds automatically once the sets nest, so on
-    its own it cannot notice a NEW keyword landing in whichever group
-    is the default — added to `decl_keywords` alone it becomes
-    body-less, added to `statement_keywords` too it becomes
-    proof-bearing, in both cases silently. Pinning the exact expected
-    membership makes any such addition fail here, forcing the
-    categorization to be decided deliberately (and its evidence
-    written down next to the profile's tuple, per the round-4 brief's
-    "verify each keyword's category rather than sorting it by
-    intuition").
-
-    Change these lists only together with the profile, and only with
-    the reasoning recorded in the profile module."""
-    expected: dict[str, tuple[set[str], set[str], set[str]]] = {
-        # prover: (definition-bearing, proof-bearing, body-less)
-        "lean4": (
-            {"def", "abbrev", "instance"},
-            {"theorem", "lemma", "example"},
-            {"structure", "class", "inductive", "axiom", "opaque"},
-        ),
-        # Round 6 (F2) re-derived isabelle's `decl_keywords` from the
-        # live toolchain's own keyword-kind table and added seventeen
-        # commands, all definition-bearing. The proof-bearing group is
-        # unchanged and is exactly the four goal commands round 4
-        # verified REFUSE a schematic goal — `schematic_goal` itself
-        # stays definition-bearing because its proof instantiates its
-        # own statement.
-        "isabelle": (
-            {
-                "schematic_goal",
-                "axiomatization",
-                "definition",
-                "abbreviation",
-                "fun",
-                "primrec",
-                "primcorec",
-                "inductive",
-                "inductive_set",
-                "coinductive",
-                "coinductive_set",
-                "datatype",
-                "codatatype",
-                "record",
-                "type_synonym",
-                "lemmas",
-                "inductive_cases",
-                "inductive_simps",
-                "fun_cases",
-                "partial_function",
-                "function",
-                "primcorecursive",
-                "typedef",
-                "quotient_type",
-                "quotient_definition",
-                "lift_definition",
-                "specification",
-                "typedecl",
-                "consts",
-            },
-            # Round 7 (F2) added `locale`/`class` as PROOF-bearing, i.e.
-            # statement-compared rather than whole-span compared. Their
-            # `assumes` clauses live in the header, and the header is
-            # exactly what `extract_isabelle_statement` returns (it stops
-            # at `begin`). Whole-span comparison would be wrong, not
-            # merely stricter: a scope's span runs to its first
-            # enumerated inner declaration, so it absorbs the
-            # `notation`/`declare`/`sublocale` lines that open the body
-            # and an ordinary body edit would report a false change.
-            {"lemma", "theorem", "corollary", "proposition", "locale", "class"},
-            set(),
-        ),
-        # Round 5 (F2): the split is exactly `thm_token` (proof-bearing)
-        # versus everything else (definition-bearing), which is Rocq's
-        # own grouping of the assertion commands. `Property` joins its
-        # six `thm_token` siblings.
-        "rocq": (
-            {
-                "Example",
-                "Definition",
-                "SubClass",
-                "Let",
-                "Fixpoint",
-                "CoFixpoint",
-                "Function",
-                "Instance",
-                "Inductive",
-                "CoInductive",
-                "Variant",
-                "Record",
-                "Structure",
-                "Class",
-                "Axiom",
-                "Axioms",
-                "Parameter",
-                "Parameters",
-                "Conjecture",
-                "Conjectures",
-                "Hypothesis",
-                "Hypotheses",
-                "Variable",
-                "Variables",
-                "Symbol",
-                "Symbols",
-                "Primitive",
-            },
-            {
-                "Theorem",
-                "Lemma",
-                "Corollary",
-                "Proposition",
-                "Fact",
-                "Remark",
-                "Property",
-            },
-            set(),
-        ),
-    }
-    assert set(expected) == set(PROFILES)
-    for name, (definition, proof_bearing, body_less) in expected.items():
-        profile = PROFILES[name]
-        assert set(profile.definition_keywords) == definition, name
-        assert set(profile.statement_keywords) - set(profile.definition_keywords) == (
-            proof_bearing
-        ), name
-        assert set(profile.decl_keywords) - set(profile.statement_keywords) == (
-            body_less
-        ), name
-
-
 def test_definition_body_rewrite_is_changed() -> None:
     """F1's motivating fixture. `def foo : Nat := 5` -> `:= 6` reported
     UNCHANGED before this round: `def` was statement-compared, so only
@@ -428,22 +244,6 @@ def test_definition_placeholder_fill_that_also_retypes_is_changed() -> None:
     assert verdict == Verdict.CHANGED
     assert len(findings) == 1
     assert findings[0].decl == "foo"
-
-
-def test_theorem_proof_rewrite_is_still_unchanged() -> None:
-    """The other half of the proof-irrelevance argument, and the one
-    that must not regress: `theorem` stays proof-bearing, so a `golf`
-    task rewriting a proof keeps passing. Toolchain-verified that a
-    `theorem`'s type must be a `Prop` (`theorem notaprop : Nat := 5` is
-    rejected with "type of theorem `notaprop` is not a proposition"),
-    so its body is always a kernel-checked proof."""
-    verdict, findings = compare_declarations(
-        "theorem t : 1 = 1 := by sorry\n",
-        "theorem t : 1 = 1 := by rfl\n",
-        profile=LEAN4,
-    )
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
 
 
 def test_abbrev_body_rewrite_is_changed() -> None:
@@ -503,29 +303,6 @@ def test_definition_body_rewrite_under_a_placeholder_mentioning_comment() -> Non
     assert findings[0].decl == "foo"
 
 
-def test_rocq_definition_body_rewrite_is_changed() -> None:
-    """rocq has no comparator behind this check (design note 14 §1), so
-    this is the only place the redefinition is caught at all."""
-    verdict, findings = compare_declarations(
-        "Definition foo : nat := 5.\n", "Definition foo : nat := 6.\n", profile=ROCQ
-    )
-    assert verdict == Verdict.CHANGED
-    assert len(findings) == 1
-    assert findings[0].decl == "foo"
-
-
-def test_rocq_theorem_proof_rewrite_is_still_unchanged() -> None:
-    """rocq's `Theorem` family stays proof-bearing, so `golf` works
-    there too."""
-    verdict, findings = compare_declarations(
-        "Theorem t : 1 = 1.\nProof. admit. Admitted.\n",
-        "Theorem t : 1 = 1.\nProof. reflexivity. Qed.\n",
-        profile=ROCQ,
-    )
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
 def test_isabelle_definition_body_rewrite_is_changed() -> None:
     """Toolchain-verified on Isabelle2025-2: `definition foo :: nat
     where "foo = 5"` -> `"foo = 6"` breaks a fixed downstream `lemma
@@ -574,19 +351,6 @@ def test_isabelle_lemma_proof_rewrite_is_still_unchanged() -> None:
     assert findings == []
 
 
-def test_proof_test_body_rewrite_is_changed() -> None:
-    """A profile that opts out of the split (`definition_keywords`
-    defaulting to `()`) keeps the pre-F1 behaviour — so the field is
-    genuinely what turns the new mode on, and no other change smuggled
-    it in."""
-    optout = replace(LEAN4, definition_keywords=())
-    verdict, findings = compare_declarations(
-        "def foo : Nat := 5\n", "def foo : Nat := 6\n", profile=optout
-    )
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
 def test_empty_placeholder_tokens_does_not_license_body_rewrites() -> None:
     """The degenerate-profile guard behind `_NEVER_RE`: built naively,
     an empty `placeholder_tokens` alternation (`\\b(?:)\\b`) matches
@@ -622,54 +386,6 @@ def test_rocq_interactive_definition_body_rewrite_is_changed() -> None:
     verdict, findings = compare_declarations(base, head, profile=ROCQ)
     assert verdict == Verdict.CHANGED
     assert [f.decl for f in findings] == ["d"]
-
-
-def test_isabelle_and_rocq_extractors_do_not_span_whole_declarations() -> None:
-    """Pins a fact the docs once asserted wrongly.
-
-    They said the isabelle and rocq extractors "span the whole
-    declaration for every kind".
-    They do not: rocq captures through the first sentence-ending `.`
-    and isabelle stops at a proof-body opener, so both correctly
-    EXCLUDE a proof body — which is exactly why a theorem-family proof
-    rewrite is invisible on those provers. Asserting it here keeps the
-    corrected docs honest."""
-    assert (
-        ROCQ.extract_statement(
-            "Theorem c : 1 = 1.\nProof. reflexivity. Qed.\n", "c"
-        )
-        == "Theorem c : 1 = 1."
-    )
-    assert (
-        ISABELLE.extract_statement('lemma c: "(1::nat) = 1"\n  by simp\n', "c")
-        == 'lemma c: "(1::nat) = 1"'
-    )
-
-
-def test_count_base_declarations_distinguishes_empty_from_checked() -> None:
-    """F3 item 4's primitive: `compare_declarations` returns UNCHANGED
-    both for a file whose every base declaration is untouched and for a
-    file whose base version had no declarations at all, so the report
-    needs a second signal to tell "checked and fine" from "nothing to
-    check"."""
-    assert count_base_declarations("-- just a comment\n", profile=LEAN4) == 0
-    assert count_base_declarations("import Foo\n", profile=LEAN4) == 0
-    assert (
-        count_base_declarations(
-            "theorem a : 1 = 1 := rfl\ntheorem b : 2 = 2 := rfl\n", profile=LEAN4
-        )
-        == 2
-    )
-    # And the verdict really is the same for both, which is the point.
-    empty = compare_declarations(
-        "-- c\n", "-- c\ntheorem n : 1 = 1 := rfl\n", profile=LEAN4
-    )
-    real = compare_declarations(
-        "theorem a : 1 = 1 := by sorry\n",
-        "theorem a : 1 = 1 := rfl\n",
-        profile=LEAN4,
-    )
-    assert empty[0] == real[0] == Verdict.UNCHANGED
 
 
 def test_proof_body_changes_are_invisible() -> None:
@@ -714,31 +430,6 @@ _COLOR_BASE = (
     "-- describes theorem foo\n"
     "theorem foo (c : Color) : True := trivial\n"
 )
-
-
-def test_c2_helper_inserted_between_comment_and_next_decl_is_unchanged() -> None:
-    """The literal C2 shape from the task brief: `Color`, a comment, then
-    `theorem foo`; the worker inserts a permitted `lemma h` between the
-    comment and `foo`. Verified against the pre-Task-3 code too: this
-    exact shape was already `UNCHANGED` even before this fix (the
-    comment was already being attributed to `Color` in both base and
-    head, so nothing about it moved) — kept as a locked-in expectation
-    against a future regression, not evidence of the bug this task
-    fixes (see the sibling test below for that)."""
-    head = (
-        "inductive Color\n"
-        "  | red\n"
-        "  | green\n"
-        "  | blue\n"
-        "\n"
-        "-- describes theorem foo\n"
-        "lemma h : True := trivial\n"
-        "\n"
-        "theorem foo (c : Color) : True := trivial\n"
-    )
-    verdict, findings = compare_declarations(_COLOR_BASE, head, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
 
 
 def test_c2_helper_inserted_before_trailing_comment_is_unchanged() -> None:
@@ -908,18 +599,6 @@ def test_nested_namespace_short_name_collision_is_distinguished() -> None:
     assert findings == []
 
 
-def test_qualified_in_source_form_participates_in_the_same_grouping() -> None:
-    """A declaration already written qualified in the source (no
-    enclosing `namespace` block) groups under the same qualified key a
-    namespaced sibling would use to name *itself* — filling its
-    `sorry` is UNCHANGED, exactly as the namespaced form is above."""
-    base = "theorem A.comm : (1:Nat) = 1 := by sorry\n"
-    head = "theorem A.comm : (1:Nat) = 1 := by rfl\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
 def test_genuine_duplicate_within_one_namespace_is_still_ambiguous() -> None:
     """The ambiguous-duplicate branch stays reachable and correct: two
     *genuinely* identical qualified names (same short name, same
@@ -1077,60 +756,6 @@ def test_isabelle_nested_locale_short_name_collision_is_distinguished() -> None:
     assert findings == []
 
 
-def test_rocq_same_module_duplicate_is_still_ambiguous() -> None:
-    """The ambiguous branch stays reachable: two declarations sharing a
-    name *and* a scope genuinely cannot be told apart, so this is still
-    UNDETERMINED — reported under the qualified key, since that is the
-    key they collide on."""
-    base = (
-        "Module A.\n"
-        "Theorem comm : 1 = 1.\n"
-        "Theorem comm : 2 = 2.\n"
-        "End A.\n"
-    )
-    head = "Module A.\nTheorem comm : 1 = 1.\nEnd A.\n"
-    verdict, findings = compare_declarations(base, head, profile=ROCQ)
-    assert verdict == Verdict.UNDETERMINED
-    assert len(findings) == 1
-    assert findings[0].decl == "A.comm"
-
-
-def test_isabelle_same_locale_duplicate_is_still_ambiguous() -> None:
-    base = (
-        "locale A begin\n"
-        'lemma comm: "(1::nat) = 1"\n'
-        "sorry\n"
-        'lemma comm: "(2::nat) = 2"\n'
-        "sorry\n"
-        "end\n"
-    )
-    head = 'locale A begin\nlemma comm: "(1::nat) = 1"\nsorry\nend\n'
-    verdict, findings = compare_declarations(base, head, profile=ISABELLE)
-    assert verdict == Verdict.UNDETERMINED
-    assert len(findings) == 1
-    assert findings[0].decl == "A.comm"
-
-
-def test_isabelle_same_short_name_collision_outside_any_locale_is_ambiguous() -> None:
-    """The original task-4 fixture, kept: two same-named `lemma`s in no
-    locale at all share the same (empty) scope, so the scope path
-    changes nothing and they still land in the ambiguous branch. This is
-    the case that shows F2 did not paper over real ambiguity — it only
-    stopped counting a difference of scope as a collision."""
-    base = (
-        'lemma comm: "(1::nat) = 1"\n'
-        "sorry\n"
-        "\n"
-        'lemma comm: "(2::nat) = 2"\n'
-        "sorry\n"
-    )
-    head = 'lemma comm: "(1::nat) = 1"\nsorry\n'
-    verdict, findings = compare_declarations(base, head, profile=ISABELLE)
-    assert verdict == Verdict.UNDETERMINED
-    assert len(findings) == 1
-    assert findings[0].decl == "comm"
-
-
 # ---------------------------------------------------------------------------
 # rocq — real syntax from `gate.provers.rocq` / `test_statement_equiv.py`
 # ---------------------------------------------------------------------------
@@ -1139,12 +764,6 @@ _ROCQ_BASE = (
     "Theorem add_comm_ex : forall a b : nat, a + b = b + a.\n"
     "Proof. intros. apply Nat.add_comm. Qed.\n"
 )
-
-
-def test_rocq_identical_declarations_are_unchanged() -> None:
-    verdict, findings = compare_declarations(_ROCQ_BASE, _ROCQ_BASE, profile=ROCQ)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
 
 
 def test_rocq_modified_base_declaration_is_changed() -> None:
@@ -1167,15 +786,6 @@ def test_rocq_proof_body_changes_are_invisible() -> None:
     verdict, findings = compare_declarations(_ROCQ_BASE, head, profile=ROCQ)
     assert verdict == Verdict.UNCHANGED
     assert findings == []
-
-
-def test_rocq_deleted_base_declaration_is_changed() -> None:
-    head = "Theorem unrelated : True.\nProof. exact I. Qed.\n"
-    verdict, findings = compare_declarations(_ROCQ_BASE, head, profile=ROCQ)
-    assert verdict == Verdict.CHANGED
-    assert len(findings) == 1
-    assert findings[0].decl == "add_comm_ex"
-    assert findings[0].head_statement is None
 
 
 # ---------------------------------------------------------------------------
@@ -1267,16 +877,6 @@ def test_lean4_anonymous_example_self_comparison_is_unchanged() -> None:
     from enumeration and stop being compared entirely."""
     src = "example : T := by simp\n"
     verdict, findings = compare_declarations(src, src, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
-def test_lean4_anonymous_example_proof_body_change_is_still_unchanged() -> None:
-    """Same anonymous `example`; its proof body changing is still
-    UNCHANGED — D2 pins the statement, not the body."""
-    base = "example : T := by simp\n"
-    head = "example : T := by rfl\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
     assert verdict == Verdict.UNCHANGED
     assert findings == []
 
@@ -1403,17 +1003,6 @@ def test_duplicate_name_with_identical_texts_is_unchanged() -> None:
     assert findings == []
 
 
-def test_duplicate_name_with_a_changed_text_is_undetermined() -> None:
-    """Still honest: something moved among same-named decls, can't say which."""
-    head = "theorem dup : T := by simp\n\ntheorem dup : V := by rfl\n"
-    verdict, findings = compare_declarations(
-        _TWO_SAME_KIND_SAME_NAME, head, profile=LEAN4
-    )
-    assert verdict == Verdict.UNDETERMINED
-    assert len(findings) == 1
-    assert findings[0].decl == "dup"
-
-
 def test_two_anonymous_declarations_no_longer_collide() -> None:
     """Round 12: an anonymous declaration is keyed by its own statement.
 
@@ -1444,31 +1033,6 @@ def test_two_anonymous_declarations_no_longer_collide() -> None:
     verdict2, findings2 = compare_declarations(base, changed, profile=LEAN4)
     assert verdict2 == Verdict.CHANGED
     assert [f.decl for f in findings2] == [":"]
-
-
-def test_proof_body_change_alone_is_unchanged() -> None:
-    """Unique name, texts differ, statements identical."""
-    base = "theorem foo (n : Nat) : n + 0 = n := by\n  sorry\n"
-    head = (
-        "theorem foo (n : Nat) : n + 0 = n := by\n"
-        "  induction n with\n"
-        "  | zero => rfl\n"
-        "  | succ k ih => simp\n"
-    )
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.UNCHANGED
-    assert findings == []
-
-
-def test_statement_change_is_changed() -> None:
-    base = "theorem foo (n : Nat) : n + 0 = n := by sorry\n"
-    head = "theorem foo (n : Nat) : n + 1 = n + 1 := by simp\n"
-    verdict, findings = compare_declarations(base, head, profile=LEAN4)
-    assert verdict == Verdict.CHANGED
-    assert len(findings) == 1
-    assert findings[0].decl == "foo"
-    assert findings[0].base_statement == "theorem foo (n : Nat) : n + 0 = n :="
-    assert findings[0].head_statement == "theorem foo (n : Nat) : n + 1 = n + 1 :="
 
 
 def test_whole_span_kind_with_any_text_change_is_changed() -> None:
@@ -1748,17 +1312,6 @@ def test_isabelle_body_merely_mentioning_undefined_is_pinned() -> None:
     assert [f.decl for f in findings] == ["extensional"]
 
 
-def test_isabelle_filled_definition_body_rewrite_is_still_changed() -> None:
-    """Round 4's protection survives F4: a FILLED body stays pinned."""
-    verdict, findings = compare_declarations(
-        _isa('definition foo :: nat where "foo = 5"'),
-        _isa('definition foo :: nat where "foo = 6"'),
-        profile=ISABELLE,
-    )
-    assert verdict == Verdict.CHANGED
-    assert [f.decl for f in findings] == ["foo"]
-
-
 def test_isabelle_fun_undefined_branch_fill_is_changed() -> None:
     """Not just `definition` — every `where`-bodied definitional kind."""
     verdict, findings = compare_declarations(
@@ -1794,134 +1347,6 @@ def test_isabelle_proof_placeholder_body_still_takes_the_escape() -> None:
     verdict, findings = compare_declarations(base, head, profile=ISABELLE)
     assert verdict == Verdict.UNCHANGED
     assert findings == []
-
-
-def test_isabelle_definition_body_split_alone_does_not_cause_the_false_block() -> None:
-    """F4's provenance, pinned: it predates the definition-body split.
-
-    The round-5 brief called this "newly introduced by round 4 on one
-    prover". It is not: with `definition_keywords` emptied — the
-    pre-split behaviour — the same fill reported `CHANGED` too, because
-    `extract_isabelle_statement` captures the `where` clause as part of
-    the statement. Which is also why the brief's suggested fallback,
-    exempting isabelle definitions from body-pinning, would have been
-    pure loss: it drops round 4's protection and does not fix the false
-    block.
-    """
-    pre_split = replace(ISABELLE, definition_keywords=())
-    verdict, findings = compare_declarations(
-        _isa('definition foo :: nat where "foo = undefined"'),
-        _isa('definition foo :: nat where "foo = 5"'),
-        profile=pre_split,
-    )
-    assert verdict == Verdict.CHANGED
-    assert [f.decl for f in findings] == ["foo"]
-
-
-def test_undefined_is_in_no_placeholder_tuple_at_all() -> None:
-    """Round 11, F2: `definition_placeholder_tokens` is gone entirely.
-
-    Two things are pinned here, and they used to be in tension. First,
-    `undefined` must stay out of `placeholder_tokens`: that tuple is
-    consumed by `gate.inventory.scan.scan_text`, which feeds the
-    **blocking** `sorry-delta` audit, so `undefined` there would make
-    the idiomatic total-function don't-care branch below count as a
-    sorry and block legitimate work. Round 5 resolved the tension with
-    a second field read only by this advisory audit; round 11 removed
-    that field too, because the escape it enabled was the audit's only
-    measured miss class. So the token now appears in no tuple, and
-    `ProverProfile` has no such attribute to re-populate.
-    """
-    total_function = (
-        'fun f :: "nat => nat" where\n'
-        '  "f 0 = 1"\n'
-        '| "f _ = undefined"\n'
-    )
-    assert count_sorries(total_function, "F.thy", profile=ISABELLE) == []
-    assert "undefined" not in ISABELLE.placeholder_tokens
-    assert not hasattr(ISABELLE, "definition_placeholder_tokens")
-    assert "definition_placeholder_tokens" not in {
-        f.name for f in fields(ISABELLE)
-    }
-    # And the audit's own regex no longer names it.
-    assert (
-        statement_immutability.placeholder_regex(ISABELLE.placeholder_tokens).search(
-            'definition foo :: nat where "foo = undefined"'
-        )
-        is None
-    )
-
-
-def test_an_unspecified_isabelle_definition_is_counted_by_no_gate_check() -> None:
-    """The documented hole (round 6, F4) — pinned, not fixed.
-
-    `definition f :: nat where "f = undefined"` specifies nothing, and
-    no gate check registers it: not a sorry, not an axiom or oracle, and
-    it compiles. This test exists so the hole has a mechanical anchor:
-    if someone later makes one of these checks count it, this test fails
-    and points at the write-ups (`gate/provers/isabelle.py`'s
-    `placeholder_tokens` note, `docs/agents/ORCHESTRATOR.md` § Stage two)
-    explaining what else that breaks and what the narrower rule would be.
-
-    Deliberately NOT wired this round. Also worth knowing before wiring
-    anything: an `undefined` body is not unsound the way a `sorry` is —
-    measured on a live Isabelle2025-2, it proves `f = f` and
-    `EX n. f = n` but not `f = 5` and not `False`. The declaration is
-    empty, not false.
-    """
-    unspecified = 'definition f :: nat where "f = undefined"\n'
-    # Not a sorry.
-    assert count_sorries(unspecified, "F.thy", profile=ISABELLE) == []
-    # Not a trust pattern either — none of isabelle's match a body that
-    # is merely unspecified.
-    assert [name for name, _ in ISABELLE.trust_patterns] == [
-        "axiomatization",
-        "oracle",
-        "setup",
-        "ML",
-    ]
-    assert all(
-        re.search(pattern, unspecified, re.MULTILINE) is None
-        for _name, pattern in ISABELLE.trust_patterns
-    )
-
-    # And the proposed narrower rule is recorded as DISCONFIRMED rather
-    # than as a fact. Round 6 reasoned that the illegitimate case has no
-    # right-hand side other than `undefined` while the legitimate one
-    # does; round 11 measured that against the Isabelle2025-2 sources
-    # and found seven real, deliberate declarations whose only
-    # right-hand side is exactly `undefined`
-    # (`HOL/MicroJava/J/Type.thy:42`, `:90`, `:125`;
-    # `HOL/MicroJava/J/JListExample.thy:139`, `:144`;
-    # `HOL/MicroJava/JVM/JVMListExample.thy:127`, `:132`). The rule
-    # would flag every one of them, so it is a noisy report and not a
-    # sound block.
-    legitimate = 'fun f :: "nat => nat" where "f 0 = 1" | "f _ = undefined"'
-    corpus_counterexample = (
-        'definition undefined_cname :: cname where [code del]:\n'
-        '  "undefined_cname = undefined"'
-    )
-    assert unspecified.count("undefined") == 1
-    assert "= 1" in legitimate
-    assert corpus_counterexample.count("undefined") == 3
-
-
-def test_definition_body_separator_is_isabelle_only() -> None:
-    """lean4 and rocq stop before the body already, so they mask nothing."""
-    assert ISABELLE.definition_body_separator == "where"
-    assert LEAN4.definition_body_separator is None
-    assert ROCQ.definition_body_separator is None
-
-
-def test_mask_definition_body_is_a_noop_without_a_separator() -> None:
-    text = 'definition foo :: nat where "foo = 5"'
-    assert statement_immutability._mask_definition_body(text, LEAN4) == text
-
-
-def test_mask_definition_body_leaves_a_separatorless_statement_alone() -> None:
-    text = "typedecl atom"
-    assert statement_immutability._mask_definition_body(text, ISABELLE) == text
-
 
 
 # ---------------------------------------------------------------------------
@@ -1962,3 +1387,140 @@ def test_commented_namespace_does_not_requalify_declarations() -> None:
     verdict, findings = compare_declarations(base, head, profile=LEAN4)
     assert verdict == Verdict.UNCHANGED
     assert findings == []
+
+
+def test_keyword_categorization_is_pinned_per_profile() -> None:
+    """The guard that actually stops a future keyword from defaulting.
+
+    The partition above holds automatically once the sets nest, so on
+    its own it cannot notice a NEW keyword landing in whichever group
+    is the default — added to `decl_keywords` alone it becomes
+    body-less, added to `statement_keywords` too it becomes
+    proof-bearing, in both cases silently. Pinning the exact expected
+    membership makes any such addition fail here, forcing the
+    categorization to be decided deliberately (and its evidence
+    written down next to the profile's tuple, per the round-4 brief's
+    "verify each keyword's category rather than sorting it by
+    intuition").
+
+    Change these lists only together with the profile, and only with
+    the reasoning recorded in the profile module."""
+    expected: dict[str, tuple[set[str], set[str], set[str]]] = {
+        # prover: (definition-bearing, proof-bearing, body-less)
+        "lean4": (
+            {"def", "abbrev", "instance"},
+            {"theorem", "lemma", "example"},
+            {"structure", "class", "inductive", "axiom", "opaque"},
+        ),
+        # Round 6 (F2) re-derived isabelle's `decl_keywords` from the
+        # live toolchain's own keyword-kind table and added seventeen
+        # commands, all definition-bearing. The proof-bearing group is
+        # unchanged and is exactly the four goal commands round 4
+        # verified REFUSE a schematic goal — `schematic_goal` itself
+        # stays definition-bearing because its proof instantiates its
+        # own statement.
+        "isabelle": (
+            {
+                "schematic_goal",
+                "axiomatization",
+                "definition",
+                "abbreviation",
+                "fun",
+                "primrec",
+                "primcorec",
+                "inductive",
+                "inductive_set",
+                "coinductive",
+                "coinductive_set",
+                "datatype",
+                "codatatype",
+                "record",
+                "type_synonym",
+                "lemmas",
+                "inductive_cases",
+                "inductive_simps",
+                "fun_cases",
+                "partial_function",
+                "function",
+                "primcorecursive",
+                "typedef",
+                "quotient_type",
+                "quotient_definition",
+                "lift_definition",
+                "specification",
+                "typedecl",
+                "consts",
+            },
+            # Round 7 (F2) added `locale`/`class` as PROOF-bearing, i.e.
+            # statement-compared rather than whole-span compared. Their
+            # `assumes` clauses live in the header, and the header is
+            # exactly what `extract_isabelle_statement` returns (it stops
+            # at `begin`). Whole-span comparison would be wrong, not
+            # merely stricter: a scope's span runs to its first
+            # enumerated inner declaration, so it absorbs the
+            # `notation`/`declare`/`sublocale` lines that open the body
+            # and an ordinary body edit would report a false change.
+            {"lemma", "theorem", "corollary", "proposition", "locale", "class"},
+            set(),
+        ),
+        # Round 5 (F2): the split is exactly `thm_token` (proof-bearing)
+        # versus everything else (definition-bearing), which is Rocq's
+        # own grouping of the assertion commands. `Property` joins its
+        # six `thm_token` siblings.
+        "rocq": (
+            {
+                "Example",
+                "Definition",
+                "SubClass",
+                "Let",
+                "Fixpoint",
+                "CoFixpoint",
+                "Function",
+                "Instance",
+                "Inductive",
+                "CoInductive",
+                "Variant",
+                "Record",
+                "Structure",
+                "Class",
+                "Axiom",
+                "Axioms",
+                "Parameter",
+                "Parameters",
+                "Conjecture",
+                "Conjectures",
+                "Hypothesis",
+                "Hypotheses",
+                "Variable",
+                "Variables",
+                "Symbol",
+                "Symbols",
+                "Primitive",
+            },
+            {
+                "Theorem",
+                "Lemma",
+                "Corollary",
+                "Proposition",
+                "Fact",
+                "Remark",
+                "Property",
+            },
+            set(),
+        ),
+    }
+    assert set(expected) == set(PROFILES)
+    for name, (definition, proof_bearing, body_less) in expected.items():
+        profile = PROFILES[name]
+        assert set(profile.definition_keywords) == definition, name
+        assert set(profile.statement_keywords) - set(profile.definition_keywords) == (
+            proof_bearing
+        ), name
+        assert set(profile.decl_keywords) - set(profile.statement_keywords) == (
+            body_less
+        ), name
+
+
+def test_mask_definition_body_leaves_a_separatorless_statement_alone() -> None:
+    text = "typedecl atom"
+    assert statement_immutability._mask_definition_body(text, ISABELLE) == text

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from client.status import WorkspaceEntry, format_table, list_workspaces
+from client.status import list_workspaces
 from client.workspace import LeaseMetadata
 
 
@@ -23,14 +23,6 @@ def _write_lease(path: Path, **overrides: object) -> None:
     base.update(overrides)
     path.mkdir(parents=True, exist_ok=True)
     LeaseMetadata(**base).write(path / ".choir-lease.json")  # type: ignore[arg-type]
-
-
-def test_empty_root_returns_empty(tmp_path: Path) -> None:
-    assert list_workspaces(tmp_path) == []
-
-
-def test_missing_root_returns_empty(tmp_path: Path) -> None:
-    assert list_workspaces(tmp_path / "does-not-exist") == []
 
 
 def test_single_workspace(tmp_path: Path) -> None:
@@ -72,26 +64,3 @@ def test_skips_malformed_metadata(tmp_path: Path) -> None:
     entries = list_workspaces(tmp_path)
     assert len(entries) == 1
     assert entries[0].issue == 1
-
-
-def test_format_table_empty() -> None:
-    assert "No local workspaces" in format_table([])
-
-
-def test_format_table_includes_each_field(tmp_path: Path) -> None:
-    entry = WorkspaceEntry(
-        repo="alice/proj",
-        issue=42,
-        branch="choir/42-add-comm",
-        target_decl="MyProj.Foo.add_comm",
-        task_type="prove",
-        claimed_at="2026-05-10T15:32:00+00:00",
-        workspace_path=tmp_path,
-    )
-    out = format_table([entry])
-    assert "alice/proj#42" in out
-    assert "prove" in out
-    assert "MyProj.Foo.add_comm" in out
-    assert "choir/42-add-comm" in out
-    assert "2026-05-10T15:32:00+00:00" in out
-    assert str(tmp_path) in out

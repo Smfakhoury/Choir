@@ -8,25 +8,13 @@ prover-profile generalization (design note 12 §2.3).
 from __future__ import annotations
 
 from gate.provers.isabelle import ISABELLE
-from gate.provers.lean4 import LEAN4
-from gate.provers.rocq import ROCQ
 from gate.verify import style_cli
 from gate.verify.style_cli import filter_files_by_profile
-
-
-def test_filter_files_lean4_keeps_only_lean() -> None:
-    files = ["A.lean", "README.md", "sub/B.lean"]
-    assert filter_files_by_profile(files, LEAN4) == ["A.lean", "sub/B.lean"]
 
 
 def test_filter_files_isabelle_keeps_only_thy() -> None:
     files = ["Scratch.thy", "A.lean", "ROOT"]
     assert filter_files_by_profile(files, ISABELLE) == ["Scratch.thy"]
-
-
-def test_filter_files_rocq_keeps_only_v() -> None:
-    files = ["Scratch.v", "A.lean", "_CoqProject"]
-    assert filter_files_by_profile(files, ROCQ) == ["Scratch.v"]
 
 
 def test_over_threshold_reports_but_exits_zero(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

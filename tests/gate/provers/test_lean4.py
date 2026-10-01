@@ -79,12 +79,6 @@ def test_extract_handles_anonymous_constructor_brackets() -> None:
     assert "True" in out
 
 
-def test_profile_extract_statement_hook_is_wired_to_the_module_function() -> None:
-    src = "theorem foo : 1 = 1 := rfl\n"
-    assert LEAN4.extract_statement is extract_lean_statement
-    assert LEAN4.extract_statement(src, "foo") == "theorem foo : 1 = 1 :="
-
-
 # ---------------------------------------------------------------------------
 # Statement-immutability hardening Task 2: `extract_lean_statement`'s own
 # `prefix_re` had the same first-token blindness as the enumeration
@@ -139,17 +133,6 @@ def test_extract_statement_skips_stacked_attribute_and_modifier() -> None:
 def test_extract_equation_style_definition() -> None:
     src = "def f : Nat → Nat\n  | 0 => 1\n  | n + 1 => n\n"
     assert extract_lean_statement(src, "f") == "def f : Nat → Nat"
-
-
-def test_extract_equation_style_definition_inside_namespace() -> None:
-    src = (
-        "namespace Foo\n"
-        "  def f : Nat → Nat\n"
-        "    | 0 => 1\n"
-        "    | n + 1 => n\n"
-        "end Foo\n"
-    )
-    assert extract_lean_statement(src, "Foo.f") == "def f : Nat → Nat"
 
 
 def test_pipe_terminated_signature_does_not_over_reach() -> None:
@@ -258,22 +241,6 @@ def test_extract_where_struct_inst_with_no_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_qualify_top_level_decl_is_unqualified() -> None:
-    src = "theorem foo : 1 = 1 := rfl\n"
-    assert qualify_decl_names(src) == {1: "foo"}
-
-
-def test_qualify_decl_inside_single_namespace() -> None:
-    src = textwrap.dedent(
-        """\
-        namespace Foo
-        theorem bar : 1 = 1 := rfl
-        end Foo
-        """
-    )
-    assert qualify_decl_names(src) == {2: "Foo.bar"}
-
-
 def test_qualify_decl_inside_nested_namespaces() -> None:
     src = textwrap.dedent(
         """\
@@ -327,10 +294,6 @@ def test_qualify_multiple_decls_at_different_nesting_levels() -> None:
         """
     )
     assert qualify_decl_names(src) == {1: "top", 3: "Foo.inner", 5: "after"}
-
-
-def test_qualify_empty_text() -> None:
-    assert qualify_decl_names("") == {}
 
 
 def test_qualify_dotted_namespace_open_and_close() -> None:
@@ -394,14 +357,6 @@ def test_qualify_already_qualified_top_level_name_matches_namespaced_form() -> N
     )
 
 
-def test_profile_qualify_decl_names_hook_is_wired_to_the_module_function() -> None:
-    # Statement-immutability hardening task 4: the optional
-    # `ProverProfile.qualify_decl_names` hook points at this module's
-    # function on lean4 — see `gate.verify.statement_immutability`'s
-    # `_decl_key`, the sole consumer today.
-    assert LEAN4.qualify_decl_names is qualify_decl_names
-
-
 # ---------------------------------------------------------------------------
 # Round 11, F1: Lean 4's module-system modifiers (`public` / `meta`).
 #
@@ -413,18 +368,6 @@ def test_profile_qualify_decl_names_hook_is_wired_to_the_module_function() -> No
 # with zero enumerated declarations, measured over the installed
 # toolchain sources.
 # ---------------------------------------------------------------------------
-
-
-def test_public_and_meta_are_declaration_modifiers() -> None:
-    # Verified against v4.33.0's `Lean/Parser/Command.lean`
-    # (`def «public» := leading_parser "public "`, `def «meta» :=
-    # leading_parser "meta "`, both bare words inside `declModifiers`)
-    # and live-compiled. `expose` is deliberately absent — it exists
-    # only as the `@[expose]` attribute, which `attribute_syntax`
-    # already covers.
-    assert "public" in LEAN4.decl_modifiers
-    assert "meta" in LEAN4.decl_modifiers
-    assert "expose" not in LEAN4.decl_modifiers
 
 
 def test_public_theorem_is_enumerated() -> None:

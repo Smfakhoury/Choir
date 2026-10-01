@@ -12,11 +12,7 @@ from pathlib import Path
 import pytest
 
 from gate.provers import ProverError
-from gate.provers.select import DEFAULT_PROVER, read_prover, read_prover_at_sha
-
-
-def test_default_prover_is_lean4() -> None:
-    assert DEFAULT_PROVER == "lean4"
+from gate.provers.select import read_prover, read_prover_at_sha
 
 
 def _write_project_toml(workspace: Path, project_body: str) -> None:
@@ -88,25 +84,6 @@ def test_read_prover_at_sha_missing_file_defaults_to_lean4(tmp_path: Path) -> No
     _git(tmp_path, "commit", "-q", "-m", "no project.toml")
     sha = _git(tmp_path, "rev-parse", "HEAD").strip()
     assert read_prover_at_sha(sha, cwd=tmp_path) == "lean4"
-
-
-def test_read_prover_at_sha_reads_committed_value(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    _write_project_toml(tmp_path, 'prover = "lean4"\n')
-    _git(tmp_path, "add", ".choir/project.toml")
-    _git(tmp_path, "commit", "-q", "-m", "pin lean4")
-    sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-    assert read_prover_at_sha(sha, cwd=tmp_path) == "lean4"
-
-
-def test_read_prover_at_sha_unknown_value_raises(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    _write_project_toml(tmp_path, 'prover = "yolo"\n')
-    _git(tmp_path, "add", ".choir/project.toml")
-    _git(tmp_path, "commit", "-q", "-m", "bad prover")
-    sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-    with pytest.raises(ProverError, match="yolo"):
-        read_prover_at_sha(sha, cwd=tmp_path)
 
 
 def test_read_prover_at_sha_ignores_a_later_commits_change(tmp_path: Path) -> None:

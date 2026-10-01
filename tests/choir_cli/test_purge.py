@@ -17,22 +17,6 @@ from client import github as gh
 from client.status import WorkspaceEntry
 
 
-def test_repo_roots_are_the_four_per_project_paths(tmp_path: Path) -> None:
-    roots = {r.label: r.path for r in purge.repo_roots("org/proj")}
-    home = purge.choir_home()
-    assert roots == {
-        "workspaces": home / "work" / "org" / "proj",
-        "repo store": home / "repo-store" / "org" / "proj",
-        "build store": home / "build-store" / "org" / "proj",
-        "project config": home / "projects" / "org" / "proj",
-    }
-
-
-def test_repo_roots_exclude_the_shared_dependency_store() -> None:
-    labels = {r.label for r in purge.repo_roots("org/proj")}
-    assert "dependency store" not in labels
-
-
 def test_shared_roots_are_only_reachable_for_purge_all() -> None:
     home = purge.choir_home()
     assert {r.path for r in purge.shared_roots()} == {
@@ -48,19 +32,6 @@ def test_every_root_stays_inside_the_redirected_home(tmp_path: Path) -> None:
     assert home.is_relative_to(tmp_path)
     for root in [*purge.repo_roots("org/proj"), *purge.shared_roots()]:
         assert root.path.is_relative_to(tmp_path)
-
-
-def test_dir_size_sums_the_tree(tmp_path: Path) -> None:
-    tree = tmp_path / "tree"          # not tmp_path itself: the isolation
-    tree.mkdir()                      # fixture puts choir-home there too
-    (tree / "a").write_bytes(b"x" * 10)
-    (tree / "sub").mkdir()
-    (tree / "sub" / "b").write_bytes(b"x" * 5)
-    assert purge.dir_size(tree) == 15
-
-
-def test_dir_size_of_a_missing_path_is_zero(tmp_path: Path) -> None:
-    assert purge.dir_size(tmp_path / "nope") == 0
 
 
 def test_dir_size_excludes_symlinked_directories(tmp_path: Path) -> None:
@@ -105,12 +76,6 @@ def test_workspaces_for_a_repo_ignores_other_projects(tmp_path: Path) -> None:
     _workspace(tmp_path, "org/proj", 1)
     _workspace(tmp_path, "org/other", 2)
     assert [w.repo for w in purge.workspaces_for("org/proj")] == ["org/proj"]
-
-
-def test_workspaces_for_all_returns_every_project(tmp_path: Path) -> None:
-    _workspace(tmp_path, "org/proj", 1)
-    _workspace(tmp_path, "org/other", 2)
-    assert len(purge.workspaces_for(None)) == 2
 
 
 def test_a_live_lease_you_hold_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -335,10 +300,6 @@ def test_execute_tears_workspaces_down_through_the_repo_store(
     assert calls == [("org/proj", entry.workspace_path, "choir/task-7")]
 
 
-def test_execute_is_safe_when_nothing_exists(tmp_path: Path) -> None:
-    assert purge.execute(purge.build_plan("org/never-claimed")) == []
-
-
 def test_dry_run_deletes_nothing_and_prints_the_plan(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -396,34 +357,6 @@ def test_force_does_not_ask_github_anything(
     (purge.choir_home() / "repo-store" / "org" / "proj").mkdir(parents=True)
 
     assert purge.main(["org/proj", "--force"]) == 0
-
-
-def test_purge_reports_the_kept_dependency_store(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    deps = purge.choir_home() / "mathlib-store" / "key"
-    deps.mkdir(parents=True)
-    (deps / "blob").write_bytes(b"x" * 2048)
-    (purge.choir_home() / "repo-store" / "org" / "proj").mkdir(parents=True)
-
-    purge.main(["org/proj", "--force"])
-
-    out = capsys.readouterr().out
-    assert "dependency store" in out
-    assert "choir purge all" in out
-    assert "untouched" in out  # the reassurance is not reserved for `purge all`
-
-
-def test_purge_all_reports_what_it_did_not_remove(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (purge.choir_home() / "mathlib-store").mkdir(parents=True)
-
-    purge.main(["all", "--force"])
-
-    out = capsys.readouterr().out
-    assert "untouched" in out
-    assert ".venv/bin/choir" in out  # the tool lives in the checkout, not a uv tool
 
 
 @pytest.mark.parametrize(

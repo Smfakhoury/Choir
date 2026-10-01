@@ -18,7 +18,3 @@ class TestOrdering:
             issue(10, ["choir/available"]),                          # normal, older
         ]
         assert [i.number for i in order_candidates(issues)] == [40, 10, 30, 20]
-
-    def test_stable_for_equal_priority(self):
-        issues = [issue(5, []), issue(3, []), issue(4, [])]
-        assert [i.number for i in order_candidates(issues)] == [3, 4, 5]

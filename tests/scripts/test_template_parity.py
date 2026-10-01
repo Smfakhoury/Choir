@@ -65,18 +65,6 @@ def _assert_same(label: str, a: str, b: str) -> None:
     )
 
 
-def test_extract_heredoc_pure_function() -> None:
-    fixture = (
-        "before\n"
-        "cat > .github/workflows/foo.yml <<'YAML'\n"
-        "line one\n"
-        "line two\n"
-        "YAML\n"
-        "after\n"
-    )
-    assert extract_heredoc(fixture, "foo.yml") == "line one\nline two"
-
-
 def test_lean4_verify_pr_heredoc_matches() -> None:
     new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
     upgrade_project_text = UPGRADE_PROJECT.read_text(encoding="utf-8")

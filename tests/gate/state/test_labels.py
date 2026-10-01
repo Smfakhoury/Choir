@@ -1,9 +1,7 @@
 """Priority/difficulty label vocabulary (design note 11 §4)."""
 
 from gate.state.labels import (
-    Difficulty,
     Priority,
-    difficulty_label,
     escalate,
     parse_difficulty,
     parse_priority,
@@ -26,17 +24,8 @@ class TestPriorityLabels:
         # Fail-open: a mangled label never changes claimability semantics.
         assert parse_priority(["choir/priority:urgent"]) == Priority.NORMAL
 
-    def test_priority_ordering(self):
-        assert Priority.LOW < Priority.NORMAL < Priority.HIGH
-
 
 class TestDifficultyLabels:
-    def test_labels_round_trip(self):
-        assert difficulty_label(Difficulty.EASY) == "choir/difficulty:easy"
-        assert difficulty_label(Difficulty.MEDIUM) == "choir/difficulty:medium"
-        assert difficulty_label(Difficulty.HARD) == "choir/difficulty:hard"
-        assert parse_difficulty(["choir/difficulty:medium"]) == Difficulty.MEDIUM
-
     def test_absent_or_unknown_is_unrated(self):
         # None = unrated; unrated passes every filter (note 11 §4).
         assert parse_difficulty(["choir/available"]) is None

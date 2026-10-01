@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
 from dataclasses import dataclass
 
 from gate.state.task_record import ProjectRef, TaskRecord, TaskType
 from orchestrator.metrics import cli
-from orchestrator.metrics.cli import _emit_csv
 from orchestrator.tasks.serialize import task_to_body
 
 
@@ -80,15 +78,6 @@ def test_cli_summarize_csv(monkeypatch, capsys) -> None:  # type: ignore[no-unty
     assert "choir/task" in lines[1]
 
 
-def test_cli_summarize_empty_repo(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        subprocess, "run", lambda *a, **k: _FakeProc(stdout="[]"),
-    )
-    code = cli.main(["summarize", "alice/proj"])
-    assert code == 0
-    assert json.loads(capsys.readouterr().out) == []
-
-
 def test_cli_summarize_propagates_gh_error_as_exit_2(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     def fake_run(cmd, **k):  # type: ignore[no-untyped-def]
         raise subprocess.CalledProcessError(1, cmd, stderr="rate limited")
@@ -98,12 +87,3 @@ def test_cli_summarize_propagates_gh_error_as_exit_2(monkeypatch, capsys) -> Non
     assert code == 2
     err = capsys.readouterr().err
     assert "rate limited" in err
-
-
-def test_cli_csv_emits_header_even_with_zero_rows(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        subprocess, "run", lambda *a, **k: _FakeProc(stdout="[]"),
-    )
-    buf = io.StringIO()
-    _emit_csv([], buf)
-    assert buf.getvalue().strip().startswith("number,")

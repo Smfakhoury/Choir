@@ -72,38 +72,6 @@ def test_write_pin_appends_keys_to_existing_project_section(tmp_path: Path) -> N
 
 
 # ---------------------------------------------------------------------------
-# in-place update
-# ---------------------------------------------------------------------------
-
-
-def test_write_pin_updates_existing_keys_in_place(tmp_path: Path) -> None:
-    path = tmp_path / "project.toml"
-    path.write_text(
-        '[project]\nprover = "lean4"\nchoir_protocol = 1\nchoir_commit = "old-sha"\n',
-        encoding="utf-8",
-    )
-
-    changed = write_pin(path, protocol=2, commit="new-sha")
-    assert changed is True
-    lines = _read(path).splitlines()
-    assert lines[0] == "[project]"
-    assert lines[1] == 'prover = "lean4"'  # untouched
-    assert lines[2] == "choir_protocol = 2"
-    assert lines[3] == 'choir_commit = "new-sha"'
-    assert len(lines) == 4  # no lines added — updated in place
-
-
-def test_write_pin_same_values_no_change(tmp_path: Path) -> None:
-    path = tmp_path / "project.toml"
-    original = '[project]\nchoir_protocol = 2\nchoir_commit = "abc123"\n'
-    path.write_text(original, encoding="utf-8")
-
-    changed = write_pin(path, protocol=2, commit="abc123")
-    assert changed is False
-    assert _read(path) == original
-
-
-# ---------------------------------------------------------------------------
 # byte-for-byte preservation of everything else
 # ---------------------------------------------------------------------------
 

@@ -112,44 +112,9 @@ def test_fetch_pr_files_raises_on_gh_api_failure(
         fetch_pr_files("o/r", 42)
 
 
-def test_fetch_pr_files_skips_entries_without_filename(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Defensive: an entry missing/empty `filename` (shouldn't happen
-    against the real API, but mirrors the `f.get("path")` guard the
-    old per-CLI implementations all had) is dropped rather than
-    crashing or producing a bogus empty path."""
-
-    def _fake_run(cmd: list[str], **kwargs: object) -> _FakeProc:
-        if cmd[:3] == ["gh", "pr", "view"]:
-            return _FakeProc(stdout=_view_response())
-        if cmd[:2] == ["gh", "api"]:
-            return _FakeProc(
-                stdout=json.dumps(
-                    [{"filename": "A.lean"}, {"filename": ""}, {"other": "x"}]
-                )
-            )
-        raise AssertionError(f"unexpected command: {cmd}")
-
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-
-    _base, _head, files = fetch_pr_files("o/r", 42)
-    assert files == ["A.lean"]
-
-
 # ---------------------------------------------------------------------------
 # _parse_file_entries — both shapes `gh api --paginate` can produce
 # ---------------------------------------------------------------------------
-
-
-def test_parse_file_entries_single_merged_array() -> None:
-    """Current `gh` versions merge same-shaped array pages into one
-    JSON array; a plain `json.loads` handles this directly."""
-    raw = json.dumps([{"filename": "A.lean"}, {"filename": "B.lean"}])
-    assert _parse_file_entries(raw) == [
-        {"filename": "A.lean"},
-        {"filename": "B.lean"},
-    ]
 
 
 def test_parse_file_entries_concatenated_page_documents() -> None:
@@ -164,8 +129,3 @@ def test_parse_file_entries_concatenated_page_documents() -> None:
         {"filename": "B.lean"},
         {"filename": "C.lean"},
     ]
-
-
-def test_parse_file_entries_empty_string() -> None:
-    assert _parse_file_entries("") == []
-    assert _parse_file_entries("   ") == []

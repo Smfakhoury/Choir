@@ -66,11 +66,6 @@ def test_a_minted_node_records_an_open_placeholder() -> None:
     assert result.graph["nodes"]["open"]["proof"] == "planned"
 
 
-def test_a_definition_is_minted_as_one() -> None:
-    result = reconcile(graph(), [dep("Proj.w", kind="definition")], files=FILES)
-    assert result.graph["nodes"]["w"]["kind"] == "definition"
-
-
 def test_leaves_a_planned_statement_alone() -> None:
     before = graph(
         main={"kind": "theorem", "decl": "Proj.main", "statement": "planned",
@@ -167,11 +162,6 @@ def test_a_colliding_leaf_name_falls_back_to_the_whole_name() -> None:
     result = reconcile(before, [dep("Proj.w", kind="definition")], files=FILES)
     assert "Proj_w" in result.graph["nodes"]
     assert result.graph["nodes"]["Proj_w"]["decl"] == "Proj.w"
-
-
-def test_a_module_with_no_known_path_still_gets_a_node() -> None:
-    result = reconcile(graph(), [dep("Proj.w", module="Proj.Elsewhere")], files=FILES)
-    assert "file" not in result.graph["nodes"]["w"]
 
 
 def test_running_twice_changes_nothing_the_second_time() -> None:

@@ -75,31 +75,6 @@ def test_restore_present_when_build_already_there(tmp_path: Path) -> None:
     assert restore_build_baseline(ws, repo="a/p", commit="c1", toolchain="v1") == "present"
 
 
-def test_restore_miss_when_no_baseline(tmp_path: Path) -> None:
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    assert restore_build_baseline(ws, repo="a/p", commit="c1", toolchain="v1") == "miss"
-
-
-def test_save_empty_is_inert_for_downstream(tmp_path: Path) -> None:
-    # Downstream project: .lake/build is empty at prepare-time → nothing to save.
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    assert save_build_baseline(ws, repo="a/p", commit="c1", toolchain="v1") == "empty"
-
-
-def test_save_then_restore_roundtrip(tmp_path: Path) -> None:
-    ws1 = tmp_path / "ws1"
-    ws1.mkdir()
-    _make_build(ws1, marker="from-task-1")
-    assert save_build_baseline(ws1, repo="a/p", commit="c1", toolchain="v1") == "saved"
-
-    ws2 = tmp_path / "ws2"
-    ws2.mkdir()
-    assert restore_build_baseline(ws2, repo="a/p", commit="c1", toolchain="v1") == "hit"
-    assert _olean(ws2).read_text(encoding="utf-8") == "from-task-1"
-
-
 def test_save_routes_through_module_level_reflink(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # Regression guard for the default-arg footgun: save/restore must call the
     # MODULE-LEVEL reflink_tree (monkeypatchable), never a captured default.

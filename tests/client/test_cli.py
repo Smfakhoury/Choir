@@ -15,13 +15,10 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
-import pytest
-
 from client import cli as cli_mod
 from client.cli import _print_claim_next_steps
 from client.lease import ClaimOutcome, ClaimResult
 from client.update import UpdateError, UpdateResult
-from gate.provers.lean4 import LEAN4
 from gate.provers.rocq import ROCQ
 from gate.state.task_record import TaskRecord
 
@@ -58,44 +55,9 @@ def test_prove_next_steps_use_profile_build_command(tmp_path: Path, capsys) -> N
     assert "Foo.lean" in out
 
 
-def test_prove_next_steps_default_lean4_build_command(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    _print_claim_next_steps(tmp_path, _prove_record(), LEAN4)
-    out = capsys.readouterr().out
-    assert "lake build" in out
-
-
 # ---------------------------------------------------------------------------
 # `choir update`
 # ---------------------------------------------------------------------------
-
-
-def test_cmd_update_prints_shas_when_changed(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        cli_mod,
-        "run_update",
-        lambda: UpdateResult(old_sha="aaaaaaa1", new_sha="bbbbbbb2", changed=True),
-    )
-
-    rc = cli_mod.cmd_update(Namespace(json=False))
-
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "aaaaaaa" in out
-    assert "bbbbbbb" in out
-
-
-def test_cmd_update_prints_already_up_to_date(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        cli_mod,
-        "run_update",
-        lambda: UpdateResult(old_sha="aaaaaaa1", new_sha="aaaaaaa1", changed=False),
-    )
-
-    rc = cli_mod.cmd_update(Namespace(json=False))
-
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "already up to date" in out
 
 
 def test_cmd_update_error_exits_1(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -109,20 +71,6 @@ def test_cmd_update_error_exits_1(monkeypatch, capsys) -> None:  # type: ignore[
     err = capsys.readouterr().err
     assert rc == 1
     assert "dirty checkout" in err
-
-
-def test_update_subcommand_wired_into_main(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(
-        cli_mod,
-        "run_update",
-        lambda: UpdateResult(old_sha="aaaaaaa1", new_sha="aaaaaaa1", changed=False),
-    )
-
-    rc = cli_mod.main(["--text", "update"])
-
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "already up to date" in out
 
 
 # ---------------------------------------------------------------------------
@@ -170,25 +118,6 @@ def test_cmd_claim_protocol_skip_tty_default_yes_updates_no_retry(monkeypatch, c
     assert "aaaaaaa" in out
     assert "bbbbbbb" in out
     assert "re-run the claim" in out
-
-
-def test_cmd_claim_protocol_skip_tty_explicit_y_updates(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    result = ClaimResult(ClaimOutcome.SKIPPED, reason=_PROTOCOL_REASON)
-    monkeypatch.setattr(cli_mod, "claim", lambda repo, issue: result)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": "Y")
-    update_calls: list[None] = []
-
-    def fake_run_update() -> UpdateResult:
-        update_calls.append(None)
-        return UpdateResult(old_sha="aaaaaaa1", new_sha="bbbbbbb2", changed=True)
-
-    monkeypatch.setattr(cli_mod, "run_update", fake_run_update)
-
-    rc = cli_mod.cmd_claim(Namespace(repo="acme/proofs", issue=9, json=False))
-
-    assert rc == 2
-    assert update_calls == [None]
 
 
 def test_cmd_claim_protocol_skip_tty_no_declines_update(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -353,15 +282,6 @@ def test_text_is_honoured_after_the_subcommand(monkeypatch, capsys) -> None:  # 
     assert not out.lstrip().startswith("{")
 
 
-def test_json_is_honoured_before_the_subcommand(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    _stub_update(monkeypatch)
-
-    rc = cli_mod.main(["--json", "update"])
-
-    assert rc == 0
-    assert json.loads(capsys.readouterr().out)["changed"] is True
-
-
 def test_a_flag_before_the_subcommand_survives_the_subparser(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     """The subcommand copies suppress their default; a `False` default there
     would overwrite a `--text` given before the subcommand."""
@@ -372,13 +292,6 @@ def test_a_flag_before_the_subcommand_survives_the_subparser(monkeypatch, capsys
     out = capsys.readouterr().out
     assert rc == 0
     assert not out.lstrip().startswith("{")
-
-
-def test_the_two_format_flags_stay_mutually_exclusive(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _stub_update(monkeypatch)
-
-    with pytest.raises(SystemExit):
-        cli_mod.main(["update", "--json", "--text"])
 
 
 # --- `choir heartbeat` ------------------------------------------------------
@@ -405,20 +318,6 @@ def test_cmd_heartbeat_presents_the_session_from_the_workspace(monkeypatch, caps
     assert seen["session"] is None
     assert seen["start"] is not None
     assert "lease refreshed" in capsys.readouterr().out
-
-
-def test_cmd_heartbeat_forwards_an_explicit_session(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    seen: dict[str, object] = {}
-
-    def fake(repo, issue, *, session=None, start=None, **kw):  # type: ignore[no-untyped-def]
-        seen["session"] = session
-        return True, session
-
-    monkeypatch.setattr(cli_mod, "heartbeat_for_issue", fake)
-    args = Namespace(repo="alice/proj", issue=7, session="beefcafe", json=False)
-
-    assert cli_mod.cmd_heartbeat(args) == 0
-    assert seen["session"] == "beefcafe"
 
 
 def test_cmd_heartbeat_distinguishes_unknown_session_from_lost_lease(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

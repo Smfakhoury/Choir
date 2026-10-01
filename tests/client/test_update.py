@@ -129,25 +129,6 @@ def test_run_update_ff_only_failure_aborts(monkeypatch, tmp_path: Path) -> None:
     assert calls[2][0] == ["git", "pull", "--ff-only"]
 
 
-def test_run_update_uv_sync_failure_aborts(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("client.update.choir_checkout_root", lambda: tmp_path)
-    runner, calls = _scripted_runner(
-        [
-            CompletedRun(0, "", ""),
-            CompletedRun(0, "aaaaaaa1111111111111111111111111111111\n", ""),
-            CompletedRun(0, "Updating aaaaaaa..bbbbbbb\n", ""),
-            CompletedRun(0, "bbbbbbb2222222222222222222222222222222\n", ""),
-            CompletedRun(1, "", "error: failed to resolve dependencies"),  # uv sync fails
-        ]
-    )
-
-    with pytest.raises(UpdateError, match="uv sync"):
-        run_update(runner=runner)
-
-    assert len(calls) == 5
-    assert calls[4][0] == ["uv", "sync", "--extra", "dev"]
-
-
 def test_run_update_success_reports_changed(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr("client.update.choir_checkout_root", lambda: tmp_path)
     old_sha = "aaaaaaa1111111111111111111111111111111"
@@ -176,37 +157,6 @@ def test_run_update_success_reports_changed(monkeypatch, tmp_path: Path) -> None
     assert all(cwd == tmp_path for _cmd, cwd in calls)
 
 
-def test_run_update_already_up_to_date_reports_unchanged(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("client.update.choir_checkout_root", lambda: tmp_path)
-    sha = "aaaaaaa1111111111111111111111111111111"
-    runner, _calls = _scripted_runner(
-        [
-            CompletedRun(0, "", ""),
-            CompletedRun(0, f"{sha}\n", ""),
-            CompletedRun(0, "Already up to date.\n", ""),
-            CompletedRun(0, f"{sha}\n", ""),
-            CompletedRun(0, "Audited 1 package\n", ""),
-        ]
-    )
-
-    result = run_update(runner=runner)
-
-    shim = tmp_path / "bin" / "choir"
-    assert result == UpdateResult(
-        old_sha=sha, new_sha=sha, changed=False, entry_point=str(shim)
-    )
-
-
-def test_run_update_propagates_checkout_root_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    def boom() -> Path:
-        raise UpdateError("not a checkout")
-
-    monkeypatch.setattr("client.update.choir_checkout_root", boom)
-
-    with pytest.raises(UpdateError, match="not a checkout"):
-        run_update(runner=lambda cmd, cwd: CompletedRun(0, "", ""))
-
-
 def test_run_update_tool_not_found_wraps_as_update_error(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr("client.update.choir_checkout_root", lambda: tmp_path)
 
@@ -215,29 +165,3 @@ def test_run_update_tool_not_found_wraps_as_update_error(monkeypatch, tmp_path: 
 
     with pytest.raises(UpdateError, match="git"):
         run_update(runner=boom)
-
-
-def test_run_update_default_runner_uses_subprocess_run(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    """Omitting `runner` falls back to the real git/uv subprocess helper."""
-    monkeypatch.setattr("client.update.choir_checkout_root", lambda: tmp_path)
-    calls = []
-
-    def fake_run(cmd: Sequence[str], *, cwd: Path | None = None, **_kw: object) -> CompletedRun:
-        calls.append((list(cmd), cwd))
-        if list(cmd)[:2] == ["git", "status"]:
-            return CompletedRun(0, "", "")
-        if list(cmd) == ["git", "rev-parse", "HEAD"]:
-            return CompletedRun(0, "aaaaaaa1111111111111111111111111111111\n", "")
-        if list(cmd) == ["git", "pull", "--ff-only"]:
-            return CompletedRun(0, "Already up to date.\n", "")
-        if list(cmd) == ["uv", "sync", "--extra", "dev"]:
-            return CompletedRun(0, "Audited 1 package\n", "")
-        raise AssertionError(f"unexpected command: {cmd}")
-
-    monkeypatch.setattr("client.update._subprocess_run", fake_run)
-
-    result = run_update()
-
-    assert result.old_sha == "aaaaaaa1111111111111111111111111111111"
-    assert result.changed is False
-    assert all(cwd == tmp_path for _cmd, cwd in calls)

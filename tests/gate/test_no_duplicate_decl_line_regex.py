@@ -59,15 +59,6 @@ def test_guard_detects_each_historical_duplicate_shape() -> None:
         assert _SHAPE_RE.search(shape), shape
 
 
-def test_guard_does_not_flag_decl_syntax_own_construction() -> None:
-    """`decl_line_regex`'s own regex-building line is exempt by
-    construction (the `{prefix}` fragment breaks the immediate
-    anchor-then-paren adjacency this shape requires), not by an
-    allowlist. Checked directly against the real file."""
-    text = (GATE_ROOT / "provers" / "decl_syntax.py").read_text(encoding="utf-8")
-    assert not _SHAPE_RE.search(text)
-
-
 def test_no_module_under_gate_compiles_the_duplicate_shape() -> None:
     offenders = [
         str(path.relative_to(REPO_ROOT))

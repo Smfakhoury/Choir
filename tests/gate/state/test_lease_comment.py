@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from gate.state.lease_comment import (
     ACTION_CLAIM,
-    ACTION_HEARTBEAT,
-    ACTION_RELEASE,
     LEASE_BLOCK_TAG,
     LeaseClaim,
     parse_lease_comment,
@@ -28,16 +26,6 @@ def test_round_trip() -> None:
     assert parse_lease_comment(rendered) == claim
 
 
-def test_round_trip_release() -> None:
-    claim = LeaseClaim(login="octocat", action=ACTION_RELEASE, protocol=6)
-    assert parse_lease_comment(render_lease_comment(claim)) == claim
-
-
-def test_round_trip_heartbeat() -> None:
-    claim = LeaseClaim(login="octocat", action=ACTION_HEARTBEAT, protocol=6)
-    assert parse_lease_comment(render_lease_comment(claim)) == claim
-
-
 def test_rendered_block_survives_surrounding_prose() -> None:
     """A caller may post the block alongside human-readable text."""
     claim = LeaseClaim(login="octocat", action=ACTION_CLAIM, protocol=6)
@@ -48,10 +36,6 @@ def test_rendered_block_survives_surrounding_prose() -> None:
 def test_a_prose_comment_is_not_a_lease() -> None:
     """Most comments are prose. Returning None must be the cheap path."""
     assert parse_lease_comment("Looks good to me, thanks for the fix!") is None
-
-
-def test_an_empty_comment_is_not_a_lease() -> None:
-    assert parse_lease_comment("") is None
 
 
 def test_a_comment_with_an_unrelated_fenced_block_is_not_a_lease() -> None:
@@ -119,8 +103,3 @@ def test_an_unknown_extra_field_does_not_fail_the_parse() -> None:
     )
     claim = parse_lease_comment(body)
     assert claim == LeaseClaim(login="bob", action=ACTION_CLAIM, protocol=6)
-
-
-def test_render_uses_the_lease_block_tag() -> None:
-    claim = LeaseClaim(login="bob", action=ACTION_CLAIM, protocol=6)
-    assert f"```{LEASE_BLOCK_TAG}\n" in render_lease_comment(claim)

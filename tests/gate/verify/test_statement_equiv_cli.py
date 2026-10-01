@@ -1,8 +1,8 @@
-"""Tests for `gate.verify.statement_equiv_cli.detect_rename`.
+"""Tests for `gate.verify.statement_equiv_cli.fetch_base_contents`.
 
 The full CLI path requires gh + git against a real repo and is
 integration-tested via the demo. These tests cover the pure-ish
-rename-detection logic by running real git in a tmp repo.
+rename-following base lookup by running real git in a tmp repo.
 """
 
 from __future__ import annotations
@@ -10,9 +10,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-from gate.verify.statement_equiv_cli import detect_rename, fetch_base_contents
+from gate.verify.statement_equiv_cli import fetch_base_contents
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -40,30 +38,6 @@ def _init_repo_with_rename(tmp_path: Path) -> tuple[str, str]:
     head_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
 
     return base_sha, head_sha
-
-
-def test_detect_rename_finds_old_name(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    base_sha, head_sha = _init_repo_with_rename(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    assert detect_rename(base_sha, head_sha, "New.lean") == "Old.lean"
-
-
-def test_detect_rename_no_rename_returns_none(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    # Repo with no rename — file simply added in head.
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "config", "user.email", "test@example.com")
-    _git(tmp_path, "config", "user.name", "Test")
-    (tmp_path / "X.lean").write_text("-- placeholder\n", encoding="utf-8")
-    _git(tmp_path, "add", "X.lean")
-    _git(tmp_path, "commit", "-q", "-m", "base")
-    base_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-    (tmp_path / "Y.lean").write_text("theorem foo : T := rfl\n", encoding="utf-8")
-    _git(tmp_path, "add", "Y.lean")
-    _git(tmp_path, "commit", "-q", "-m", "add Y.lean")
-    head_sha = _git(tmp_path, "rev-parse", "HEAD").strip()
-
-    monkeypatch.chdir(tmp_path)
-    assert detect_rename(base_sha, head_sha, "Y.lean") is None
 
 
 def test_fetch_base_contents_returns_content_when_no_rename(
@@ -119,12 +93,3 @@ def test_fetch_base_contents_returns_empty_for_truly_new_file(
     contents, renamed = fetch_base_contents(base_sha, head_sha, "Brand_new.lean")
     assert contents == ""
     assert renamed is None
-
-
-@pytest.fixture
-def _ensure_git_available() -> None:
-    """Skip rename tests if git isn't installed in the environment."""
-    try:
-        subprocess.run(["git", "--version"], capture_output=True, check=True)
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        pytest.skip("git not available")

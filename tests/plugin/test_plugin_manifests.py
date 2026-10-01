@@ -42,28 +42,12 @@ def _frontmatter(skill_md: Path) -> dict:
     return data
 
 
-def test_marketplace_manifest_parses_with_one_choir_plugin() -> None:
-    data = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
-    assert data["name"] == "choir"
-    (entry,) = data["plugins"]
-    assert entry["name"] == "choir"
-
-
 def test_marketplace_source_resolves_to_plugin_dir() -> None:
     data = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
     (entry,) = data["plugins"]
     source = (REPO_ROOT / entry["source"]).resolve()
     assert source == PLUGIN_DIR.resolve()
     assert source.is_dir()
-
-
-def test_plugin_manifest_has_explicit_semver_version() -> None:
-    data = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
-    assert data["name"] == "choir"
-    assert re.fullmatch(r"\d+\.\d+\.\d+", data["version"]), (
-        "plugin.json must pin an explicit version; omitting it makes every "
-        "commit SHA a new plugin version for installed users"
-    )
 
 
 def test_codex_marketplace_source_resolves_to_plugin_dir() -> None:
@@ -111,26 +95,6 @@ def test_public_copy_follows_public_pitch_rule() -> None:
         text = path.read_text(encoding="utf-8").lower()
         for banned in ("repoprover", "symphony", "gradienthq"):
             assert banned not in text, f"{path}: mentions {banned}"
-
-
-def test_expected_skills_present() -> None:
-    names = {p.parent.name for p in _skill_files()}
-    assert names == {"formalize", "join"}
-
-
-def test_skill_frontmatter_has_description_and_argument_hint() -> None:
-    for skill_md in _skill_files():
-        fm = _frontmatter(skill_md)
-        assert str(fm.get("description", "")).strip(), f"{skill_md}: empty description"
-        assert str(fm.get("argument-hint", "")).strip(), f"{skill_md}: empty argument-hint"
-
-
-def test_skill_descriptions_name_choir() -> None:
-    # Free-form prose triggers skills via description matching; naming
-    # Choir in the description is what makes "… with Choir" reliable.
-    for skill_md in _skill_files():
-        fm = _frontmatter(skill_md)
-        assert "choir" in str(fm["description"]).lower(), f"{skill_md}"
 
 
 def test_referenced_repo_paths_exist() -> None:

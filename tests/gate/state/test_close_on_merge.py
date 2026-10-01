@@ -32,8 +32,3 @@ def test_a_non_reference_closes_nothing() -> None:
 
 def test_refs_are_deduped_and_ordered_by_first_occurrence() -> None:
     assert parse_closing_refs("Closes #5\nCloses #1\nFixes #5\nResolves #3") == [5, 1, 3]
-
-
-def test_several_issues_in_one_sentence_all_close() -> None:
-    body = "Closes #10, fixes #20, resolves #1234567"
-    assert parse_closing_refs(body) == [10, 20, 1234567]

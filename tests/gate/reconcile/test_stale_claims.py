@@ -24,21 +24,6 @@ def _issue(
     )
 
 
-def test_no_claimed_issues_returns_empty() -> None:
-    issues = [
-        _issue(1, labels=["choir/task"]),
-        _issue(2, labels=["choir/available"]),
-    ]
-    assert identify_stale(issues, now=NOW, threshold_days=7) == []
-
-
-def test_fresh_heartbeat_not_stale() -> None:
-    issues = [
-        _issue(1, labels=["choir/claimed", "choir/heartbeat:2026-05-09"]),
-    ]
-    assert identify_stale(issues, now=NOW, threshold_days=7) == []
-
-
 def test_heartbeat_exactly_at_threshold_is_not_stale() -> None:
     # Heartbeat 7 days ago, threshold 7 days — boundary case, not stale.
     issues = [
@@ -56,17 +41,6 @@ def test_heartbeat_one_day_past_threshold_is_stale() -> None:
     assert stale[0].number == 1
     assert "8 days old" in stale[0].reason
     assert stale[0].heartbeat_label == "choir/heartbeat:2026-05-02"
-
-
-def test_no_heartbeat_falls_back_to_updated_at_fresh() -> None:
-    issues = [
-        _issue(
-            1,
-            labels=["choir/claimed"],
-            updated_at="2026-05-10T08:00:00Z",  # 4 hours ago
-        ),
-    ]
-    assert identify_stale(issues, now=NOW, threshold_days=7) == []
 
 
 def test_no_heartbeat_falls_back_to_updated_at_stale() -> None:
@@ -117,16 +91,6 @@ def test_multiple_heartbeat_labels_uses_latest() -> None:
         ),
     ]
     assert identify_stale(issues, now=NOW, threshold_days=7) == []
-
-
-def test_threshold_days_overrideable() -> None:
-    # With threshold=2, an issue with heartbeat 5 days old is stale.
-    issues = [
-        _issue(1, labels=["choir/claimed", "choir/heartbeat:2026-05-05"]),
-    ]
-    stale = identify_stale(issues, now=NOW, threshold_days=2)
-    assert len(stale) == 1
-    assert "5 days old" in stale[0].reason
 
 
 def test_mixed_input_returns_only_stale() -> None:

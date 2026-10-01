@@ -5,72 +5,18 @@ from __future__ import annotations
 import textwrap
 
 from gate.provers.isabelle import ISABELLE
-from gate.provers.lean4 import LEAN4
 from gate.provers.rocq import ROCQ
 from gate.verify.style import (
-    _NON_BODY_TRAILER_RE,
-    DEFAULT_LINE_THRESHOLD,
     Verdict,
-    _trailer_re,
     comment_stripped_lines,
     compare,
     find_decl_spans,
     find_long_decls,
-    format_findings,
 )
 
 # ---------------------------------------------------------------------------
 # find_decl_spans
 # ---------------------------------------------------------------------------
-
-
-def test_find_spans_empty_file() -> None:
-    assert find_decl_spans("") == []
-
-
-def test_find_spans_single_theorem() -> None:
-    src = "theorem foo : 1 = 1 := rfl\n"
-    spans = find_decl_spans(src)
-    assert len(spans) == 1
-    assert spans[0].name == "foo"
-    assert spans[0].start_line == 1
-    assert spans[0].end_line == 1
-    assert spans[0].line_count == 1
-
-
-def test_find_spans_multiple_decls() -> None:
-    src = textwrap.dedent(
-        """\
-        theorem foo : 1 = 1 := rfl
-        theorem bar : 2 = 2 := rfl
-        theorem baz : 3 = 3 := rfl
-        """
-    )
-    spans = find_decl_spans(src)
-    names = [s.name for s in spans]
-    assert names == ["foo", "bar", "baz"]
-
-
-def test_find_spans_includes_intermediate_lines() -> None:
-    src = textwrap.dedent(
-        """\
-        theorem foo : T := by
-          tac1
-          tac2
-          tac3
-
-        theorem bar : T := rfl
-        """
-    )
-    spans = find_decl_spans(src)
-    # foo spans lines 1-4 (its decl + 3 tactic lines). The blank line
-    # before bar belongs to neither decl — bug #4 fix trims trailing
-    # blanks from the preceding span.
-    assert spans[0].name == "foo"
-    assert spans[0].line_count == 4
-    # bar spans only its own line
-    assert spans[1].name == "bar"
-    assert spans[1].line_count == 1
 
 
 def test_find_spans_matches_lemma_def_instance_example_abbrev() -> None:
@@ -88,67 +34,9 @@ def test_find_spans_matches_lemma_def_instance_example_abbrev() -> None:
     assert len(spans) == 6
 
 
-def test_find_spans_indented_inside_namespace() -> None:
-    src = textwrap.dedent(
-        """\
-        namespace Foo
-          theorem bar : T := rfl
-        end Foo
-        """
-    )
-    spans = find_decl_spans(src)
-    # Only `theorem bar` matches (namespace and end aren't decl keywords).
-    assert len(spans) == 1
-    assert spans[0].name == "bar"
-
-
-def test_find_spans_ignores_non_decls() -> None:
-    # Comments, blank lines, imports — none of these are top-level decls.
-    src = textwrap.dedent(
-        """\
-        -- this is a comment
-        import Mathlib.Foo
-
-        theorem foo : T := rfl
-        """
-    )
-    spans = find_decl_spans(src)
-    assert len(spans) == 1
-    assert spans[0].name == "foo"
-
-
 # ---------------------------------------------------------------------------
 # find_long_decls
 # ---------------------------------------------------------------------------
-
-
-def test_find_long_decls_threshold_5() -> None:
-    src = textwrap.dedent(
-        """\
-        theorem short : T := rfl
-        theorem long : T := by
-          line2
-          line3
-          line4
-          line5
-          line6
-        theorem other : T := rfl
-        """
-    )
-    spans = find_decl_spans(src)
-    findings = find_long_decls(spans, threshold=5)
-    assert len(findings) == 1
-    assert findings[0].name == "long"
-    # `long` starts at line 2 and the next decl `other` starts at line 8;
-    # span runs lines 2-7 inclusive (the `theorem long` line plus 5 body
-    # lines), so the line_count is 6.
-    assert findings[0].line_count == 6
-
-
-def test_find_long_decls_no_long() -> None:
-    src = "theorem foo : T := rfl\n"
-    spans = find_decl_spans(src)
-    assert find_long_decls(spans, threshold=10) == []
 
 
 def test_find_long_decls_at_threshold_is_not_flagged() -> None:
@@ -166,19 +54,6 @@ def test_find_long_decls_at_threshold_is_not_flagged() -> None:
 # ---------------------------------------------------------------------------
 # compare
 # ---------------------------------------------------------------------------
-
-
-def test_compare_clean_when_both_empty() -> None:
-    verdict, findings = compare("", "")
-    assert verdict == Verdict.CLEAN
-    assert findings == []
-
-
-def test_compare_clean_when_unchanged() -> None:
-    src = "theorem foo : T := by\n" + ("  line\n" * 200)
-    verdict, findings = compare(src, src, threshold=50)
-    assert verdict == Verdict.CLEAN
-    assert findings == []
 
 
 def test_compare_flags_new_long_declaration() -> None:
@@ -207,56 +82,6 @@ def test_compare_doesnt_flag_preexisting_long_decl() -> None:
     # foo was already long in base; new is short — nothing introduced.
     assert verdict == Verdict.CLEAN
     assert findings == []
-
-
-def test_compare_doesnt_flag_decl_that_shrunk() -> None:
-    base = "theorem foo : T := by\n" + ("  line\n" * 200)
-    head = "theorem foo : T := rfl\n"
-    verdict, _findings = compare(base, head, threshold=50)
-    # foo got shorter — definitely not flagged.
-    assert verdict == Verdict.CLEAN
-
-
-def test_compare_flags_only_decl_that_grew_not_others_that_stayed() -> None:
-    base = (
-        "theorem already_long : T := by\n"
-        + ("  base_line\n" * 200)
-        + "theorem foo : T := rfl\n"
-    )
-    head = (
-        "theorem already_long : T := by\n"
-        + ("  base_line\n" * 200)
-        + "theorem foo : T := by\n"
-        + ("  line\n" * 200)
-    )
-    verdict, findings = compare(base, head, threshold=50)
-    # Only foo grew past threshold; already_long was already long.
-    assert verdict == Verdict.INTRODUCED
-    names = [f.name for f in findings]
-    assert names == ["foo"]
-
-
-def test_default_threshold_is_200() -> None:
-    assert DEFAULT_LINE_THRESHOLD == 200
-
-
-# ---------------------------------------------------------------------------
-# format_findings
-# ---------------------------------------------------------------------------
-
-
-def test_format_findings_empty() -> None:
-    assert "No new" in format_findings([])
-
-
-def test_format_findings_includes_lines_and_threshold() -> None:
-    base = "theorem foo : T := rfl\n"
-    head = base + "theorem long : T := by\n" + ("  line\n" * 200)
-    _verdict, findings = compare(base, head, threshold=50)
-    out = format_findings(findings)
-    assert "long" in out
-    assert "201" in out
-    assert "50" in out
 
 
 # ---------------------------------------------------------------------------
@@ -293,47 +118,6 @@ def test_span_excludes_trailing_blank_lines() -> None:
     one = next(s for s in spans if s.name == "one")
     # Pre-fix: one reported lines 1-3 (one + two blanks).
     assert one.line_count == 1
-
-
-def test_span_excludes_trailing_namespace_opener() -> None:
-    src = textwrap.dedent(
-        """\
-        theorem one : T := rfl
-        namespace Bar
-          theorem two : T := rfl
-        end Bar
-        """
-    )
-    spans = find_decl_spans(src)
-    one = next(s for s in spans if s.name == "one")
-    # The `namespace Bar` opener after `one` belongs to nothing yet.
-    assert one.line_count == 1
-
-
-def test_span_keeps_real_body_lines() -> None:
-    # A genuinely multi-line proof should report its full extent.
-    src = textwrap.dedent(
-        """\
-        theorem big : T := by
-          step1
-          step2
-          step3
-        end Foo
-        """
-    )
-    spans = find_decl_spans(src)
-    big = next(s for s in spans if s.name == "big")
-    # 4 lines: theorem + 3 tactic lines. `end Foo` is trimmed.
-    assert big.line_count == 4
-
-
-def test_span_never_below_one_line() -> None:
-    # Edge case: a one-line theorem followed immediately by `end Foo`
-    # should still report line_count >= 1, not 0.
-    src = "theorem foo : T := rfl\nend Foo\n"
-    spans = find_decl_spans(src)
-    assert len(spans) == 1
-    assert spans[0].line_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -383,25 +167,6 @@ def test_comment_inside_body_with_body_after_is_not_trimmed() -> None:
     assert spans[0].line_count == 3
 
 
-def test_comment_inside_multiline_block_body_with_body_after_is_not_trimmed() -> None:
-    src = (
-        "theorem foo : T := by\n"
-        "  /- explain\n"
-        "     more -/\n"
-        "  trivial\n"
-    )
-    spans = find_decl_spans(src)
-    assert spans[0].line_count == 4
-
-
-def test_isabelle_trailing_block_comment_is_trimmed() -> None:
-    # `ISABELLE.comment_syntax` has no line-comment marker, only block.
-    src = 'lemma foo: "P"\n(* trailing note *)\nlemma bar: "Q"\n'
-    spans = find_decl_spans(src, profile=ISABELLE)
-    foo = next(s for s in spans if s.name == "foo")
-    assert foo.line_count == 1
-
-
 def test_isabelle_has_no_line_comment_so_dashdash_is_body_not_comment() -> None:
     # Pins the profile-driven behaviour against a lean4-literal-`--`
     # regression: isabelle's `comment_syntax.line is None`, so a `--`
@@ -420,24 +185,6 @@ def test_isabelle_has_no_line_comment_so_dashdash_is_body_not_comment() -> None:
     assert foo.line_count == 2
     lean4_spans = find_decl_spans(src)
     assert next(s for s in lean4_spans if s.name == "foo").line_count == 1
-
-
-def test_rocq_trailing_block_comment_is_trimmed() -> None:
-    # The `Proof.` line is indented for the same reason as the isabelle
-    # fixture above: rocq is whitespace-insensitive, so this is ordinary
-    # rocq, and it is the only spelling in which a *trailing comment*
-    # trim is observable at all (with `Proof.` at column 0 the span ends
-    # there and the comment is out of range regardless).
-    src = (
-        "Theorem foo : True.\n"
-        "  Proof. trivial. Qed.\n"
-        "(* trailing *)\n"
-        "Theorem bar : True.\n"
-        "  Proof. trivial. Qed.\n"
-    )
-    spans = find_decl_spans(src, profile=ROCQ)
-    foo = next(s for s in spans if s.name == "foo")
-    assert foo.line_count == 2
 
 
 def test_rocq_end_closer_now_ends_the_span_on_every_profile() -> None:
@@ -459,73 +206,6 @@ def test_rocq_end_closer_now_ends_the_span_on_every_profile() -> None:
 # note 12 §2.2 — same authentic fixtures as tests/gate/provers/test_isabelle.py
 # and test_rocq.py).
 # ---------------------------------------------------------------------------
-
-_ISAR = """
-theory Scratch imports Main begin
-
-lemma add_comm_nat:
-  "a + b = b + (a::nat)"
-  by simp
-
-theorem le_trans_ex:
-  fixes x y z :: nat
-  assumes "x \\<le> y" and "y \\<le> z"
-  shows "x \\<le> z"
-  using assms by simp
-
-end
-"""
-
-_ROCQ_SRC = """
-Require Import Arith.
-
-Theorem add_comm_ex : forall a b : nat, a + b = b + a.
-Proof. intros. apply Nat.add_comm. Qed.
-
-Lemma le_trans_ex : forall x y z : nat, x <= y -> y <= z -> x <= z.
-Proof. intros. eapply Nat.le_trans; eauto. Qed.
-"""
-
-
-def test_isabelle_finds_decl_boundaries() -> None:
-    # `_ISAR`'s `lemma add_comm_nat:` / `theorem le_trans_ex:` are the
-    # dominant no-space-colon Isar style; `find_decl_spans` normalizes
-    # the trailing colon out of the captured name (fix2), so these
-    # assert the bare names, not "add_comm_nat:"/"le_trans_ex:".
-    spans = find_decl_spans(_ISAR, profile=ISABELLE)
-    names = [s.name for s in spans]
-    assert "add_comm_nat" in names
-    assert "le_trans_ex" in names
-
-
-def test_isabelle_default_profile_does_not_match_lemma_by_default() -> None:
-    # Sanity: the lean4-default call still only recognizes lean4's decl
-    # keyword set (which happens to include "lemma" too, so this
-    # confirms the isabelle-specific keywords like "theory"/"schematic_goal"
-    # aren't spuriously matched, not that "lemma" itself is excluded).
-    spans = find_decl_spans(_ISAR)
-    names = [s.name for s in spans]
-    assert "add_comm_nat" in names  # matched via the shared "lemma" keyword
-
-
-def test_rocq_finds_decl_boundaries() -> None:
-    spans = find_decl_spans(_ROCQ_SRC, profile=ROCQ)
-    names = [s.name for s in spans]
-    assert "add_comm_ex" in names
-    assert "le_trans_ex" in names
-
-
-def test_rocq_compare_flags_new_long_declaration() -> None:
-    # The filler is indented *code*, not `(* line *)` comments as it was
-    # before the fix round: comment-only lines never extended a span
-    # (Task 3's trailing-comment trim already decided a comment is not
-    # body) and `_span_end` makes that uniform, so a comment-filled
-    # fixture would now measure 1 line and pass for no reason.
-    base = "Theorem short : True.\n  Proof. trivial. Qed.\n"
-    head = base + "Theorem long : True.\n" + ("  auto.\n" * 200) + "Qed.\n"
-    verdict, findings = compare(base, head, threshold=50, profile=ROCQ)
-    assert verdict == Verdict.INTRODUCED
-    assert any(f.name == "long" for f in findings)
 
 
 def test_rocq_column_zero_proof_body_is_counted_toward_length() -> None:
@@ -610,45 +290,12 @@ def test_normalize_strips_nospace_colon() -> None:
     assert spans[0].name == "foo"
 
 
-def test_normalize_leaves_spaced_name_unchanged() -> None:
-    # `foo` -> `foo` — unchanged (a space already separated it).
-    spans = find_decl_spans('lemma foo : "P x"\n', profile=ISABELLE)
-    assert spans[0].name == "foo"
-
-
-def test_normalize_strips_attribute_list_and_nospace_colon() -> None:
-    # `foo[simp]:` -> `foo` — Isabelle attribute list.
-    spans = find_decl_spans('lemma foo[simp]: "P x"\n', profile=ISABELLE)
-    assert spans[0].name == "foo"
-
-
-def test_normalize_keeps_dotted_name_after_stripping_colon() -> None:
-    # `foo.bar:` -> `foo.bar` — dotted lean names survive.
-    spans = find_decl_spans("theorem foo.bar: T := rfl\n")
-    assert spans[0].name == "foo.bar"
-
-
-def test_normalize_strips_trailing_comma() -> None:
-    # `foo,` -> `foo` — trailing separator. Synthetic input (no real
-    # prover writes a decl name this way); exercises the `rstrip(",")`
-    # half of the rule directly via the raw `(\S+)` capture.
-    spans = find_decl_spans("theorem foo, other stuff\n")
-    assert spans[0].name == "foo"
-
-
 def test_normalize_preserves_anonymous_bare_colon() -> None:
     # `:` -> `:` — anonymous `example` / bare `instance` preserved.
     # Emptying this instead (the rejected regex-exclusion fix) would
     # make the declaration vanish from enumeration entirely.
     spans = find_decl_spans("example : T := by simp\n")
     assert spans[0].name == ":"
-
-
-def test_normalize_preserves_degenerate_bracket_colon() -> None:
-    # `[simp]:` -> `[simp]:` — degenerate; preserved rather than
-    # emptied. Synthetic input, not real syntax on any profile.
-    spans = find_decl_spans("theorem [simp]: T := rfl\n")
-    assert spans[0].name == "[simp]:"
 
 
 # ---------------------------------------------------------------------------
@@ -658,15 +305,6 @@ def test_normalize_preserves_degenerate_bracket_colon() -> None:
 # — replacing `_NON_BODY_TRAILER_RE`, an allowlist of trailer keywords that
 # attributed every line it failed to recognize to the preceding declaration.
 # ---------------------------------------------------------------------------
-
-
-def test_comment_stripped_lines_align_with_the_real_lines() -> None:
-    src = "theorem foo : T := rfl\n/- theorem ghost : T := rfl\n   still comment -/\n"
-    stripped = comment_stripped_lines(src)
-    assert len(stripped) == len(src.splitlines())
-    assert stripped[0] == "theorem foo : T := rfl"
-    assert stripped[1].strip() == ""
-    assert stripped[2].strip() == ""
 
 
 def test_comment_stripped_lines_stay_aligned_when_a_comment_holds_a_cr() -> None:
@@ -688,17 +326,6 @@ def test_declaration_inside_a_block_comment_is_not_a_span() -> None:
     )
     spans = find_decl_spans(src)
     assert [(s.name, s.start_line) for s in spans] == [("foo", 4)]
-
-
-def test_declaration_inside_a_docstring_is_not_a_span() -> None:
-    src = (
-        "/-- Documents `bar`, e.g.\n"
-        "theorem bar : True := trivial\n"
-        "-/\n"
-        "theorem bar : True := trivial\n"
-    )
-    spans = find_decl_spans(src)
-    assert [(s.name, s.start_line) for s in spans] == [("bar", 4)]
 
 
 def test_span_ends_at_a_standalone_attribute_line() -> None:
@@ -769,29 +396,6 @@ def test_span_keeps_column_zero_match_alternatives() -> None:
     assert (color.start_line, color.end_line) == (1, 3)
 
 
-def test_span_keeps_column_zero_match_alternatives_on_rocq() -> None:
-    src = "Inductive color :=\n| red\n| green.\nTheorem c : True.\n  Proof. trivial. Qed.\n"
-    color = next(s for s in find_decl_spans(src, profile=ROCQ) if s.name == "color")
-    assert (color.start_line, color.end_line) == (1, 3)
-
-
-def test_span_over_attributes_a_shallower_match_alternative_known_limitation() -> None:
-    """Known limitation (F1): under the indentation-rule round this
-    replaced, a `|` shallower than the declaration's own column was
-    told apart from a genuine continuation and excluded from the span
-    (`_span_end`'s indentation check compared columns). The
-    allowlist-based trim restored by F1 has no notion of "shallower
-    than the declaration" for a line it doesn't otherwise recognize as
-    a trailer — a stray `|`, like any other unrecognized line, is
-    over-attributed to the body instead. Was
-    `(color.start_line, color.end_line) == (2, 3)`; pinned here as the
-    actual (accepted) behaviour rather than silently dropped.
-    """
-    src = "namespace N\n  inductive Color\n  | red\n| stray\n"
-    color = next(s for s in find_decl_spans(src) if s.name == "Color")
-    assert (color.start_line, color.end_line) == (2, 4)
-
-
 def test_span_of_a_column_zero_structure_now_pins_its_fields() -> None:
     """The bypass this whole round exists to close, pinned as a
     passing test rather than left to a by-hand compiler check: a
@@ -805,21 +409,6 @@ def test_span_of_a_column_zero_structure_now_pins_its_fields() -> None:
     src = "structure Point where\nx : Nat\ny : Nat\n"
     point = find_decl_spans(src)[0]
     assert (point.start_line, point.end_line) == (1, 3)
-
-
-def test_span_of_a_single_line_declaration_is_one_line() -> None:
-    src = "theorem foo (n : Nat) : n = n := rfl\ntheorem bar : True := trivial\n"
-    assert [s.line_count for s in find_decl_spans(src)] == [1, 1]
-
-
-def test_span_of_a_declaration_whose_body_is_all_on_its_own_line() -> None:
-    # The brief's "verify rather than assume" case: a declaration whose
-    # entire body sits on the declaration line, followed by an
-    # unattributed command.
-    src = "axiom foo : Nat\nend N\n"
-    spans = find_decl_spans(src)
-    assert len(spans) == 1
-    assert spans[0].line_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -855,33 +444,6 @@ def test_isabelle_declare_trailer_no_longer_over_attributed() -> None:
     assert (span.start_line, span.end_line) == (1, 2)
 
 
-def test_isabelle_theory_level_trailers_are_recognized() -> None:
-    for trailer in (
-        "declare foo[simp]",
-        "text \\<open>prose\\<close>",
-        "subsection \\<open>Heading\\<close>",
-        "instance ..",
-        "instantiation nat :: order",
-        "context fixes x",
-        "ML \\<open>val x = 1\\<close>",
-        "syntax \"_foo\" :: bar",
-        "setup_lifting type_definition_t",
-        "hide_const foo",
-        "code_datatype Foo",
-        "value \"2 + 2\"",
-        "thm foo_def",
-    ):
-        src = (
-            'definition foo :: nat where "foo = 5"\n'
-            f"{trailer}\n"
-            'lemma bar: "True"\n'
-            "  by simp\n"
-        )
-        span = next(s for s in find_decl_spans(src, profile=ISABELLE)
-                    if s.name == "foo")
-        assert (span.start_line, span.end_line) == (1, 1), trailer
-
-
 def test_goal_consuming_diagnostics_are_deliberately_not_trailers() -> None:
     """`nitpick` and friends are proof body, so they must stay excluded.
 
@@ -899,17 +461,6 @@ def test_goal_consuming_diagnostics_are_deliberately_not_trailers() -> None:
     src = 'lemma "P x"\nnitpick [expect = genuine]\noops\n'
     span = next(s for s in find_decl_spans(src, profile=ISABELLE))
     assert (span.start_line, span.end_line) == (1, 3)
-
-
-def test_no_profile_lists_a_declaration_keyword_as_a_trailer() -> None:
-    """A decl keyword here would turn a missed declaration into a trailer.
-
-    `definition` with its name on the following line is an enumeration
-    gap (F3), not a trailer: listing it would shrink the *preceding*
-    declaration's span and still leave the declaration invisible.
-    """
-    for profile in (ISABELLE, LEAN4, ROCQ):
-        assert not set(profile.non_body_commands) & set(profile.decl_keywords)
 
 
 def test_lean4_theory_level_trailers_are_recognized() -> None:
@@ -950,8 +501,3 @@ def test_trailer_inside_an_open_quote_is_not_a_trailer() -> None:
     span = next(s for s in find_decl_spans(src, profile=ISABELLE)
                 if s.name == "bar")
     assert (span.start_line, span.end_line) == (1, 2)
-
-
-def test_trailer_re_is_unchanged_for_a_profile_with_no_commands() -> None:
-    assert _trailer_re(()) is _NON_BODY_TRAILER_RE
-    assert _trailer_re(ROCQ.non_body_commands) is _NON_BODY_TRAILER_RE

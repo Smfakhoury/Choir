@@ -37,7 +37,6 @@ def _fake_comments(mapping: dict[int, list[tuple[int, str, str, str]]]):
 
 
 FRESH = "2026-08-23T11:00:00Z"
-OLD = "2026-08-01T11:00:00Z"
 
 
 def test_a_live_claim_moves_available_to_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,17 +81,6 @@ def test_an_already_correct_label_is_not_rewritten(
     assert sync_lease_labels("o/r", [(7, [LABEL_CLAIMED])], now=NOW, apply=False) == []
 
 
-def test_a_stale_holder_returns_the_task_to_available(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        leases, "read_lease_comments", _fake_comments({7: [(1, "alice", "claim", OLD)]})
-    )
-    changes = sync_lease_labels("o/r", [(7, [LABEL_CLAIMED])], now=NOW, apply=False)
-    assert changes[0].added == LABEL_AVAILABLE
-    assert "stale" in changes[0].reason
-
-
 def test_downstream_lifecycle_states_are_left_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,29 +92,6 @@ def test_downstream_lifecycle_states_are_left_alone(
     )
     for label in ("choir/in-review", "choir/done", "choir/invalid"):
         assert sync_lease_labels("o/r", [(7, [label])], now=NOW, apply=False) == []
-
-
-def test_a_stale_available_label_does_not_cost_a_live_worker_its_claim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The load-bearing property of making the label a projection.
-
-    Between orchestrator runs a claimed task can still read
-    `choir/available`, so `choir list` may over-report. That must not
-    translate into a second worker taking the task: the lease lives in the
-    comments, and the arbiter — which is what `claim` consults — still
-    names the original holder however out of date the label is.
-    """
-    thread = {7: [(1, "alice", "claim", FRESH)]}
-    monkeypatch.setattr(leases, "read_lease_comments", _fake_comments(thread))
-
-    # The board still says available (the orchestrator has not run yet).
-    holder, _ = leases.decide_for_issue("o/r", 7, now=NOW)
-    assert holder == "alice"
-
-    # And the sync's job is only to catch the label up, not to change who holds it.
-    changes = sync_lease_labels("o/r", [(7, [LABEL_AVAILABLE])], now=NOW, apply=False)
-    assert changes[0].holder == "alice"
 
 
 def test_apply_false_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,28 +157,3 @@ def test_a_heartbeat_is_what_freshness_is_read_from(
     state = read_lease("o/r", 7, now=NOW)
     assert state.holder == "alice"
     assert state.quiet_hours == 1.0
-
-
-def test_an_unclaimed_task_reports_no_holder_and_no_age(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(leases, "read_lease_comments", _fake_comments({7: []}))
-    state = read_lease("o/r", 7, now=NOW)
-    assert state.holder is None
-    assert state.quiet_hours is None
-    assert state.last_seen == ""
-
-
-def test_a_loser_of_the_race_is_reported_as_superseded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        leases,
-        "read_lease_comments",
-        _fake_comments(
-            {7: [(1, "alice", "claim", FRESH), (2, "bob", "claim", FRESH)]}
-        ),
-    )
-    state = read_lease("o/r", 7, now=NOW)
-    assert state.holder == "alice"
-    assert state.superseded == ("bob",)

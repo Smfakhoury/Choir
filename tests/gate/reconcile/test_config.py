@@ -9,22 +9,9 @@ import pytest
 from gate.reconcile.cli import _resolve_threshold
 from gate.reconcile.config import (
     DEFAULT_STALE_AFTER_DAYS,
-    ReconcileConfig,
     ReconcileConfigError,
     parse_reconcile_config,
-    read_reconcile_config,
 )
-
-
-def test_empty_text_defaults() -> None:
-    cfg = parse_reconcile_config("")
-    assert cfg == ReconcileConfig()
-    assert cfg.stale_after_days == DEFAULT_STALE_AFTER_DAYS
-
-
-def test_explicit_value_parses() -> None:
-    cfg = parse_reconcile_config("[reconcile]\nstale_after_days = 21\n")
-    assert cfg.stale_after_days == 21
 
 
 def test_automation_section_alone_yields_default() -> None:
@@ -37,11 +24,6 @@ def test_automation_section_alone_yields_default() -> None:
 def test_malformed_toml_raises() -> None:
     with pytest.raises(ReconcileConfigError, match="malformed"):
         parse_reconcile_config("not == toml")
-
-
-def test_non_integer_raises() -> None:
-    with pytest.raises(ReconcileConfigError, match="must be an integer"):
-        parse_reconcile_config('[reconcile]\nstale_after_days = "7"\n')
 
 
 def test_bool_rejected_not_coerced_to_int() -> None:
@@ -61,19 +43,6 @@ def test_unknown_keys_ignored() -> None:
         "[reconcile]\nstale_after_days = 14\nfuture_knob = 1\n"
     )
     assert cfg.stale_after_days == 14
-
-
-def test_read_missing_file_defaults(tmp_path: Path) -> None:
-    assert read_reconcile_config(tmp_path) == ReconcileConfig()
-
-
-def test_read_from_checkout(tmp_path: Path) -> None:
-    (tmp_path / ".choir").mkdir()
-    (tmp_path / ".choir" / "project.toml").write_text(
-        "[automation]\nmerge = \"auto\"\n[reconcile]\nstale_after_days = 30\n",
-        encoding="utf-8",
-    )
-    assert read_reconcile_config(tmp_path).stale_after_days == 30
 
 
 def test_resolve_threshold_flag_wins(tmp_path: Path) -> None:

@@ -42,11 +42,6 @@ def test_unknown_version_is_error() -> None:
     assert isinstance(parse_reduction_block(body), ReductionParseError)
 
 
-def test_child_without_decl_is_error() -> None:
-    body = "```choir-reduction\nchoir-reduction-version: 1\nparent: A\nchildren:\n  - note: hi\n```"
-    assert isinstance(parse_reduction_block(body), ReductionParseError)
-
-
 def test_empty_children_is_error() -> None:
     body = "```choir-reduction\nchoir-reduction-version: 1\nparent: A\nchildren: []\n```"
     assert isinstance(parse_reduction_block(body), ReductionParseError)
@@ -67,14 +62,6 @@ def test_malformed_yaml_is_error() -> None:
 
 def test_unterminated_block_is_error() -> None:
     body = "```choir-reduction\nchoir-reduction-version: 1\nparent: A\n"
-    assert isinstance(parse_reduction_block(body), ReductionParseError)
-
-
-def test_decl_shape_is_validated() -> None:
-    body = (
-        "```choir-reduction\nchoir-reduction-version: 1\nparent: A\n"
-        "children:\n  - decl: 'not a name'\n```"
-    )
     assert isinstance(parse_reduction_block(body), ReductionParseError)
 
 
@@ -144,3 +131,11 @@ def test_uniformly_indented_block_parses() -> None:
     assert isinstance(record, ReductionRecord)
     assert record.parent == "Y"
     assert record.children[0].decl == "C"
+
+
+def test_decl_shape_is_validated() -> None:
+    body = (
+        "```choir-reduction\nchoir-reduction-version: 1\nparent: A\n"
+        "children:\n  - decl: 'not a name'\n```"
+    )
+    assert isinstance(parse_reduction_block(body), ReductionParseError)

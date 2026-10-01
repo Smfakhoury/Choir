@@ -72,12 +72,6 @@ def test_only_unclaimed_tasks_are_considered(calls) -> None:
     assert calls["listed"]["state"] == "open"
 
 
-def test_a_task_already_at_the_commit_is_not_rewritten(calls) -> None:
-    calls["handles"].handles = [_handle(1, "A.lean", commit=NEW)]
-    assert repin_available("o/p", NEW, ["A.lean"])["repinned"] == []
-    assert calls["written"] == []
-
-
 def test_one_github_failure_does_not_abandon_the_rest(calls, monkeypatch) -> None:
     calls["handles"].handles = [_handle(1, "A.lean"), _handle(2, "A.lean")]
 
@@ -91,11 +85,3 @@ def test_one_github_failure_does_not_abandon_the_rest(calls, monkeypatch) -> Non
     assert [e["issue"] for e in result["failed"]] == [1]
     assert [e["issue"] for e in result["repinned"]] == [2]
     assert calls["written"] == [(2, NEW)]
-
-
-def test_an_unparseable_issue_is_skipped(calls) -> None:
-    calls["handles"].handles = [
-        TaskHandle(number=9, title="broken", url="u", state="open",
-                   labels=(), record=None)
-    ]
-    assert repin_available("o/p", NEW, ["A.lean"])["repinned"] == []

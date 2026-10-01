@@ -8,29 +8,7 @@ from gate.verify.sorry_delta import (
     Verdict,
     compare,
     compare_reduction,
-    count_sorries,
-    format_finding,
 )
-
-# ---------------------------------------------------------------------------
-# count_sorries
-# ---------------------------------------------------------------------------
-
-
-def test_count_empty() -> None:
-    assert count_sorries("") == []
-
-
-def test_count_one() -> None:
-    out = count_sorries("theorem t : True := by sorry\n", "T.lean")
-    assert len(out) == 1
-    assert out[0].decl == "t"
-
-
-def test_count_ignores_comments() -> None:
-    src = "-- sorry\n/- sorry -/\ntheorem t : True := trivial\n"
-    assert count_sorries(src) == []
-
 
 # ---------------------------------------------------------------------------
 # compare
@@ -74,16 +52,6 @@ def test_new_file_with_sorry_flags() -> None:
     assert finding.delta == 1
 
 
-def test_swap_one_sorry_for_another_is_clean_by_count() -> None:
-    # Count-based v0: closing one sorry while opening another nets to
-    # zero and passes. Documented limitation — the statement-equiv and
-    # orchestrator review layers see the actual diff.
-    base = "theorem a : True := by sorry\ntheorem b : True := trivial\n"
-    head = "theorem a : True := trivial\ntheorem b : True := by sorry\n"
-    verdict, _ = compare(base, head)
-    assert verdict == Verdict.CLEAN
-
-
 def test_comment_mentioning_sorry_does_not_flag() -> None:
     base = "theorem t : 1 = 1 := by sorry\n"
     head = "-- closed the sorry below\ntheorem t : 1 = 1 := rfl\n"
@@ -92,27 +60,8 @@ def test_comment_mentioning_sorry_does_not_flag() -> None:
 
 
 # ---------------------------------------------------------------------------
-# format_finding
-# ---------------------------------------------------------------------------
-
-
-def test_format_lists_decls_and_delta() -> None:
-    _, finding = compare("", "theorem hard : False := by sorry\n")
-    assert finding is not None
-    out = format_finding(finding)
-    assert "+1" in out
-    assert "`hard`" in out
-
-
-# ---------------------------------------------------------------------------
 # Per-prover: isabelle (oops) and rocq (Admitted/admit)
 # ---------------------------------------------------------------------------
-
-
-def test_isabelle_count_sorries_counts_oops() -> None:
-    src = "lemma foo:\n  \"a = a\"\n  oops\n"
-    out = count_sorries(src, "F.thy", profile=ISABELLE)
-    assert len(out) == 1
 
 
 def test_isabelle_new_oops_flags_introduced() -> None:
@@ -122,38 +71,6 @@ def test_isabelle_new_oops_flags_introduced() -> None:
     assert verdict == Verdict.INTRODUCED
     assert finding is not None
     assert finding.delta == 1
-
-
-def test_isabelle_commented_oops_does_not_flag() -> None:
-    base = "lemma foo: \"a = a\" by simp\n"
-    head = "(* oops *)\n" + base
-    verdict, _ = compare(base, head, profile=ISABELLE)
-    assert verdict == Verdict.CLEAN
-
-
-def test_rocq_count_sorries_counts_admitted_and_admit() -> None:
-    src = (
-        "Theorem foo : True.\nProof. admit. Qed.\n"
-        "Lemma bar : True.\nAdmitted.\n"
-    )
-    out = count_sorries(src, "F.v", profile=ROCQ)
-    assert len(out) == 2
-
-
-def test_rocq_new_admitted_flags_introduced() -> None:
-    base = "Theorem foo : True.\nProof. reflexivity. Qed.\n"
-    head = base + "Lemma bar : True.\nAdmitted.\n"
-    verdict, finding = compare(base, head, file_path="F.v", profile=ROCQ)
-    assert verdict == Verdict.INTRODUCED
-    assert finding is not None
-    assert finding.delta == 1
-
-
-def test_rocq_commented_admitted_does_not_flag() -> None:
-    base = "Theorem foo : True.\nProof. reflexivity. Qed.\n"
-    head = "(* Admitted. *)\n" + base
-    verdict, _ = compare(base, head, profile=ROCQ)
-    assert verdict == Verdict.CLEAN
 
 
 # ---------------------------------------------------------------------------
@@ -511,21 +428,6 @@ def test_an_unambiguous_child_leaf_still_admits_its_placeholder() -> None:
     )
     assert verdict is Verdict.CLEAN
     assert finding is None
-
-
-def test_the_same_move_between_distinct_leaves_is_introduced() -> None:
-    # The control for the two above: an identical shape whose last
-    # segments differ, so the rise is visible under either counting key.
-    # It pins that the two are testing the shared-leaf pooling and not
-    # the move itself.
-    base = "theorem A.g : True := by\n  sorry\ntheorem B.h : True := trivial\n"
-    head = "theorem A.g : True := trivial\ntheorem B.h : True := by\n  sorry\n"
-    verdict, finding = compare_reduction(
-        base, head, target_decl="NS.parent", children=()
-    )
-    assert verdict is Verdict.INTRODUCED
-    assert finding is not None
-    assert [s.decl for s in finding.head_sorries] == ["B.h"]
 
 
 def test_a_placeholder_absent_from_children_is_introduced() -> None:

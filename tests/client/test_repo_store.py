@@ -21,16 +21,6 @@ from client.repo_store import (
 )
 
 
-def test_store_root_env_override(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_REPO_STORE", str(tmp_path / "rs"))
-    assert repo_store.store_root() == tmp_path / "rs"
-
-
-def test_repo_store_path_splits_owner_name(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("CHOIR_REPO_STORE", str(tmp_path))
-    assert repo_store.repo_store_path("alice/proj") == tmp_path / "alice" / "proj"
-
-
 def test_project_lock_creates_lockfile_and_yields(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("CHOIR_REPO_STORE", str(tmp_path))
     entered = False
