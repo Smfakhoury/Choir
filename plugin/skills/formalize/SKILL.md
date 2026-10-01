@@ -42,3 +42,8 @@ never improvise a step the playbook or its scripts already own.
    configuration interview. Bootstrap or resume as the playbook
    determines, then run the plan/publish/review/merge loop in this
    session at the project's configured automation level.
+
+   If the user names another tool to plan or orchestrate with ("use
+   AutoformBot for orchestrating"), also read
+   `~/.choir/checkout/docs/agents/integrations/README.md` and that tool's
+   note, and run the loop with the tool in the slots the note names.

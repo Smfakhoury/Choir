@@ -37,7 +37,7 @@ Focus on the overall proof structure and mathematical strategy. Leave the
 detailed work to workers wherever you can. An idle contributor pool is a signal
 to replan, not licence to prove.
 
-Hold the whole project in view. The route in `roadmap/README.md` is yours, and
+Hold the whole project in view. The route in your plan is yours, and
 so is knowing what comes next; a worker sees one node, and a reduction's author
 sees one split. Delegate detail freely — hand a subagent a sub-theorem to
 check.
@@ -139,6 +139,10 @@ exists there is nothing to publish.
 leanblueprint, a LaTeX blueprint, or an external planner keeps what it
 has. Use the default unless the overseer gave you another workflow.
 
+When the overseer names a tool to plan or orchestrate with, read its note
+in `integrations/` (`integrations/README.md` lists them). The note says which
+steps of this loop the tool fills; every other step runs as written here.
+
 ## The loop
 
 Read the automation level and the prover once at loop start (§ Automation
@@ -173,14 +177,15 @@ The inventory is your ground truth: what is still unproven (sorries) and
 what is assumed (axioms). **Compare it against your plan** and correct
 whichever is wrong.
 
-Ask the same question of the plan's derived half:
+Ask the same question of the plan's derived half. Under the default plan:
 
 ```bash
 choir orch sync-graph <project-checkout> --check
 ```
 
 `sync-graph` is idempotent, so anything it reports here is a merge that
-landed without one (§ 3). Reading a plan whose edges are stale is worse
+landed without one (§ 3). A plan kept another way has its own check, named
+in its integration note. Reading a plan whose edges are stale is worse
 than reading no plan: a node with no recorded dependencies computes as
 complete, so a chapter resting on an open proof shows finished.
 
@@ -449,7 +454,8 @@ or report.
 
 After merges land, bring the derived half of the plan back in step —
 every declaration the merge introduced becomes a node, and every
-formalized node gets the edges its term actually has:
+formalized node gets the edges its term actually has. Under the default
+plan:
 
 ```bash
 choir orch sync-graph <checkout>
@@ -459,7 +465,8 @@ It reads compiled artifacts and refuses unless they are up to date with
 the source, so pull first and let it check the rest. It rewrites only
 what it derives: group membership, prose, the statuses and any planned
 node's edges are yours and are left alone
-(`orchestrator-planning.md` § `roadmap/graph.json`). Then record what
+(`orchestrator-planning.md` § `roadmap/graph.json`). A plan kept another
+way records a merge as its integration note says. Then record what
 landed, and publish the nodes the plan now shows ready — the default's
 readiness test is `orchestrator-planning.md` § What to publish:
 
@@ -592,7 +599,8 @@ prover (`orchestrator-review.md` § Salvaging a failed PR).
 
 The roadmap, decomposition guidance, stuck tasks, golf tasks, priority and
 difficulty labels, and recording what you learn are in
-`orchestrator-planning.md`.
+`orchestrator-planning.md`. Its § The roadmap describes the default plan;
+everything after it applies whatever plan you keep.
 
 ## Boundaries (non-negotiable)
 

@@ -140,6 +140,11 @@ proof. Hand the proving to a subagent where your harness has them — a new
 session or a cleared context otherwise — and keep the loop itself, the
 claiming and submitting and telling your user, outside it.
 
+**If your user named a tool to prove with, it runs here**, inside this
+workspace and under every rule in this manual. Its note in `integrations/`
+(`integrations/README.md` lists them) says how to drive it and which of its
+own steps to skip.
+
 **Whatever proves the task reports back what it tried and what failed.**
 Gate feedback arrives after that context is gone, and a fix starts from
 that report plus the workspace on disk.

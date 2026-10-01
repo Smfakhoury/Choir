@@ -74,8 +74,9 @@ Check four things:
 
 Then:
 
-- **Accept** — merge, run `choir orch sync-graph <checkout>` so each child the
-  PR introduced becomes a node, give each the group its parent holds, publish
+- **Accept** — merge, bring the plan up to date so each child the PR
+  introduced becomes a node (`choir orch sync-graph <checkout>` under the
+  default plan), give each the group its parent holds, publish
   a `prove` task per node, and account for the new nodes in that group's
   prose. The group is inherited, not chosen: a child lives in the target's
   file and is part of the same result. A child naming an obligation already in

@@ -39,3 +39,8 @@ playbooks — never improvise a step the script or playbook already owns.
    That document is the contributor's operating manual: claiming a task,
    proving it, submitting, and what the gate will check. Everything after
    setup is its domain, not this skill's.
+
+   If the user names another tool to prove with ("use AutoformBot as a
+   worker"), also read `./choir/docs/agents/integrations/README.md` and that
+   tool's note: the tool does the proving, and the manual still governs
+   everything around it.

@@ -284,7 +284,8 @@ The project-specific part is yours:
 - **Skill pack**: write `skills/` if contributors need project
   conventions (`SKILL_PACKS.md` for the layout and how it reaches a
   worker; `samples/lean4/skills/` for a minimal one).
-- Then write the roadmap (`orchestrator-planning.md` § The roadmap),
+- Then write the roadmap (`orchestrator-planning.md` § The roadmap, or the
+  plan an integration note names),
   publish the first tasks, and print the joining prompt (below) for the
   overseer to hand to contributors.
 
