@@ -15,9 +15,10 @@ Comment stripping, declaration-boundary attribution, and the
 placeholder scan are all parameterized by a `gate.provers.ProverProfile`
 (default `lean4`, so every existing caller/test is unchanged — design
 note 12 §2/§3). Axiom-name inventorying (`AxiomItem`) stays lean4's
-`axiom NAME` syntax only; the other two profiles have no analogous
+`axiom NAME` syntax only; the other three profiles have no analogous
 inventory need yet (their trust-model assumptions surface through
-`axiom_honesty`'s profile-driven `trust_patterns`, not this module).
+`axiom_honesty`'s profile-driven `trust_patterns`, not this module —
+on fstar, `assume val` is caught there rather than here).
 
 Declaration-boundary matching is
 `gate.provers.decl_syntax.decl_line_regex_for`, the single source for

@@ -80,6 +80,13 @@ def _run_auto_mode(
     print()
 
     unresolved: list[tuple[str, str]] = []
+    # Identical findings are printed once. A file-scoped probe (fstar)
+    # returns the same file's entries for every target in that file, so
+    # one admit would otherwise be listed once per changed declaration.
+    # Harmless for declaration-scoped provers: there the probe is keyed
+    # by declaration name, so two targets cannot produce the same line
+    # unless it is genuinely the same finding.
+    reported: set[str] = set()
     for target in targets:
         try:
             entries = collect_trust_report(
@@ -90,9 +97,13 @@ def _run_auto_mode(
             continue
         for entry in entries:
             if entry.clean:
-                print(f"✓ {entry.decl}: closed (no axioms/oracles)")
+                line = f"✓ {entry.decl}: closed (no axioms/oracles)"
             else:
-                print(f"⚠ {entry.decl}: depends on {', '.join(entry.assumptions)}")
+                line = f"⚠ {entry.decl}: depends on {', '.join(entry.assumptions)}"
+            if line in reported:
+                continue
+            reported.add(line)
+            print(line)
 
     if unresolved:
         print()

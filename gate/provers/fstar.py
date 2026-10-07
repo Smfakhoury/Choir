@@ -39,6 +39,24 @@ not attributed to that target, unlike lean4's `#print axioms`, which
 returns a transitive closure. `sorry-delta` would not flag it either
 (delta zero; the admit was already at base). The inventory listing
 every admit with its location is the mitigation.
+
+The probe is **file-scoped**, not declaration-scoped. F* has no
+per-declaration assumption query, so `collect_trust_report`'s
+`(targets, imports)` pair is resolved to the module's source file and
+that file is re-checked; entries are keyed by source location to say
+exactly that. Two consequences, both deliberate:
+
+- The probe must re-elaborate rather than load a `.checked` cache, or
+  it reports nothing at all and a missing proof reads as clean. See
+  `fstar_trust_report_command`.
+- `verify-trust-report` calls the probe once per changed declaration,
+  so several declarations in one file re-check that file and repeat
+  its findings. The repetition is noise, not error. It is amplified by
+  `changed_decls._is_target`, which targets any repeated name
+  unconditionally — and in F* a `val f`/`let f` pair legitimately
+  shares one name, so both halves are always targeted. Left alone
+  because that rule is shared with rocq and isabelle and errs toward
+  probing, which is the safe direction.
 """
 
 from __future__ import annotations
@@ -452,15 +470,112 @@ _OPTION_NAME_RE = re.compile(r"Every use of this option triggers a warning:\s*(?
 _TACTIC_ADMIT_RE = re.compile(r"Tactics admitted goal")
 
 
+def _probe_is_project_location(location: str) -> bool:
+    """True when a warning location names a file in the project.
+
+    The probe hands F* workspace-*relative* paths (see `_rel` in
+    `fstar_trust_report_command`) and runs with `cwd=workspace`, so F*
+    echoes the project's own files back relatively. Anything it
+    resolves through the include path instead -- ulib, Pulse -- comes
+    back as an absolute path. Verified:
+
+        * Warning 335 at /.../lib/fstar/ulib/Prims.fst(444,2-444,7):
+        * Warning 335 at Demo/Demo.Clrs.fst(4,22-4,27):
+
+    That split is what makes `--cache_off` usable. Without the filter
+    the probe would report the standard library's own internal `admit`
+    in `Prims.fst` on every run, as if the project had introduced it.
+    The toolchain's internals are part of what a prover is trusted to
+    be; the project's use of an escape hatch is what this report is
+    about.
+    """
+    return not Path(location.split("(", 1)[0]).is_absolute()
+
+
+def _resolve_probe_sources(workspace: Path, targets: list[str], imports: list[str]) -> list[Path]:
+    """Map the probe request onto the source file F* must re-check.
+
+    `collect_trust_report`'s contract hands `targets` as *declaration
+    names* and `imports` as the modules those declarations live in
+    (`gate/verify/trust_report_cli.py` passes `[target.name]` and
+    `[target.module]`). F* has no per-declaration assumption query --
+    `--report_assumes` is a property of checking a file -- so the
+    module name is what the probe can act on.
+
+    `changed_decls._module_for` derives a non-lean4 module as the file
+    stem, and an F* module `A.B.C` lives in `A.B.C.fst`, so the stem
+    *is* the module name and the mapping inverts by searching the tree
+    for `<module>.fsti` or `<module>.fst`. The interface is preferred
+    when both exist: a `val` in a `.fsti` is where an `assume` would
+    hide.
+
+    Falls back to treating a target as a path when it names a real
+    file, which keeps a direct `--decl Mod.fst` invocation working.
+    """
+    sources: list[Path] = []
+    seen: set[Path] = set()
+
+    for module in imports:
+        for suffix in (".fsti", ".fst"):
+            matches = sorted(workspace.glob(f"**/{module}{suffix}"))
+            if matches:
+                if matches[0] not in seen:
+                    seen.add(matches[0])
+                    sources.append(matches[0])
+                break
+
+    if not sources:
+        for target in targets:
+            candidate = workspace / target
+            if candidate.is_file() and candidate.suffix in (".fst", ".fsti"):
+                if candidate not in seen:
+                    seen.add(candidate)
+                    sources.append(candidate)
+
+    return sources
+
+
 def fstar_trust_report_command(
     workspace: Path, targets: list[str], imports: list[str]
 ) -> list[str]:
     """Build the `--report_assumes` probe argv.
 
-    `targets` are source files to check; `imports` are extra
-    `--include` directories. No probe file is written — unlike rocq and
-    isabelle, F* takes the request entirely on the command line, so
-    there is nothing for `collect_trust_report` to clean up.
+    `targets` are declaration names and `imports` their modules, per
+    `collect_trust_report`'s contract; `_resolve_probe_sources` turns
+    that into the one source file to re-check. Exactly one file is
+    passed: current F* resolves dependencies on the fly and rejects
+    more than one file on the command line.
+
+    The result is file-scoped, not declaration-scoped, and
+    `parse_fstar_trust_report` keys entries by source location to say
+    so. F* cannot answer "which axioms does *this declaration* depend
+    on", and attributing a file's every admit to whichever declaration
+    happened to be queried would be a false attribution, not a coarse
+    one.
+
+    No probe file is written -- unlike rocq and isabelle, F* takes the
+    request entirely on the command line, so there is nothing for
+    `collect_trust_report` to clean up.
+
+    `--cache_off` is a soundness requirement, not a precaution. If F*
+    loads a module from a `.checked` file it never re-elaborates it,
+    so `--report_assumes` emits nothing and an admitted proof reports
+    clean -- and `verify-pr` builds before `verify-trust-report` runs,
+    so a cache is warm exactly when it matters. Measured on a module
+    with one `admit`, counting warnings:
+
+        project cache in `.cache/`, probe given `--cache_dir .cache`   0
+        `.checked` sitting beside the source, no `--cache_off`         0
+        `--cache_off`                                                  2
+
+    Redirecting `--cache_dir` to a scratch path is *not* enough: it
+    covers the first row only. F* picks up a `.checked` file next to
+    the source whatever `--cache_dir` says, and where the cache lands
+    is the project Makefile's choice -- `build_command` is just `make
+    verify`, so this profile must not depend on it. The cost is the
+    standard library being re-elaborated too, which is ~0.5s per probe
+    and brings ulib's own internal `admit` into the output;
+    `_probe_is_project_location` filters that back out.
 
     Wrapped in `sh -c` for one specific reason: F* writes these
     warnings to **stderr** (verified by stream-splitting the probe),
@@ -469,10 +584,43 @@ def fstar_trust_report_command(
     instead of changing a code path that lean4, isabelle and rocq all
     depend on and that their parsers were validated against.
     """
-    argv = ["fstar.exe", "--report_assumes", "warn"]
-    for include in imports:
+    sources = _resolve_probe_sources(workspace, targets, imports)
+    if not sources:
+        # Imported here, not at module scope: `gate.provers.__init__`
+        # imports FSTAR from this module, so a top-level import of
+        # ProverError would close a cycle.
+        from gate.provers import ProverError
+
+        requested = ", ".join(imports or targets) or "<nothing>"
+        raise ProverError(
+            f"trust-report probe: no F* source file found for {requested} "
+            f"under {workspace} (expected <module>.fst or <module>.fsti)"
+        )
+
+    # Paths relative to the workspace: `_run_probe` runs with
+    # `cwd=workspace`, and F* echoes the path it was given back in
+    # every warning location, so relative paths keep the report
+    # readable and independent of where the workspace is mounted.
+    def _rel(path: Path) -> str:
+        try:
+            return str(path.relative_to(workspace))
+        except ValueError:
+            return str(path)
+
+    # Every directory holding F* sources, so on-the-fly dependency
+    # resolution can find the project's other modules.
+    include_dirs = sorted(
+        {
+            _rel(path.parent)
+            for suffix in (".fst", ".fsti")
+            for path in workspace.glob(f"**/*{suffix}")
+        }
+    )
+
+    argv = ["fstar.exe", "--report_assumes", "warn", "--cache_off"]
+    for include in include_dirs:
         argv += ["--include", include]
-    argv += list(targets)
+    argv.append(_rel(sources[0]))
     return ["sh", "-c", f"{shlex.join(argv)} 2>&1"]
 
 
@@ -497,6 +645,8 @@ def parse_fstar_trust_report(output: str) -> list[TrustEntry]:
         body_end = headers[index + 1].start() if index + 1 < len(headers) else len(output)
         body = output[header.end() : body_end]
         location = header.group("loc")
+        if not _probe_is_project_location(location):
+            continue
 
         axiom = _AXIOM_NAME_RE.search(body)
         option = _OPTION_NAME_RE.search(body)
