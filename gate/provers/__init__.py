@@ -15,6 +15,7 @@ back-compat with the pre-generalization behavior.
 from __future__ import annotations
 
 from gate.provers.base import CommentSyntax, ProverProfile, TrustEntry
+from gate.provers.fstar import FSTAR
 from gate.provers.isabelle import ISABELLE
 from gate.provers.lean4 import LEAN4
 from gate.provers.rocq import ROCQ
@@ -28,6 +29,7 @@ PROFILES: dict[str, ProverProfile] = {
     "lean4": LEAN4,
     "isabelle": ISABELLE,
     "rocq": ROCQ,
+    "fstar": FSTAR,
 }
 
 

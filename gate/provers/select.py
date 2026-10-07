@@ -23,7 +23,7 @@ defaulting on a typo would be a worse failure mode than refusing.
 Format::
 
     [project]
-    prover = "lean4"   # or "isabelle" / "rocq"
+    prover = "lean4"   # or "isabelle" / "rocq" / "fstar"
 """
 
 from __future__ import annotations

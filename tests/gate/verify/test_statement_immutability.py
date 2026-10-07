@@ -1508,6 +1508,43 @@ def test_keyword_categorization_is_pinned_per_profile() -> None:
             },
             set(),
         ),
+        # F* and Pulse share one profile (one `#lang-pulse` file can
+        # hold both), so this split spans both languages' keywords.
+        #
+        # `let` and `fn` are definition-bearing, which is the one call
+        # here that is a judgement rather than a reading of the
+        # grammar: F* does not separate theorem from definition by
+        # keyword the way lean4 does — `let foo : Lemma (..) = <proof>`
+        # and `let n : int = 5` are the same keyword, told apart only
+        # by the type. Classifying them as proof-bearing would let a
+        # definition's body be rewritten silently (fail-open); this way
+        # a proof-golfing edit can report a false change instead, which
+        # is the recoverable direction, and the placeholder escape
+        # keeps ordinary `prove` tasks (base body still `admit ()`)
+        # statement-compared anyway.
+        #
+        # `val` is proof-bearing by this split's arithmetic, and that
+        # is the behaviour wanted rather than an accident: `val` has no
+        # body at all, its statement *is* the whole declaration, so
+        # statement-only comparison compares all of it.
+        "fstar": (
+            {"let", "fn", "type"},
+            {"val"},
+            {
+                "class",
+                "effect",
+                "exception",
+                "friend",
+                "include",
+                "instance",
+                "module",
+                "new_effect",
+                "open",
+                "%splice",
+                "%splice_t",
+                "sub_effect",
+            },
+        ),
     }
     assert set(expected) == set(PROFILES)
     for name, (definition, proof_bearing, body_less) in expected.items():
