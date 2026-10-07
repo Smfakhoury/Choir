@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/new-project.sh <owner/name> [--from <git-url>] [--toolchain <pin>]
-#                           [--public] [--prover lean4|isabelle|rocq]
+#                           [--public] [--prover lean4|isabelle|rocq|fstar]
 #
 #   --from <git-url>    start from an existing repo in the target prover
 #                       (its own toolchain pin, e.g. lean-toolchain, is
@@ -15,15 +15,20 @@
 #                       isabelle wants an Isabelle release tag, e.g.
 #                       "Isabelle2025" (default: "Isabelle2025"); rocq wants
 #                       an opam `rocq-prover` version, e.g. "9.0.0" (default:
-#                       "9.0.0"). Per the Choir pinned-versions rule, projects
+#                       "9.0.0"); fstar wants an F* release tag, e.g.
+#                       "v2026.09.27" (default: "v2026.09.27"). Per the
+#                       Choir pinned-versions rule, projects
 #                       pin, never float.
 #   --public            create the repo public (default: private).
-#   --prover <p>        lean4 | isabelle | rocq (default: lean4). Selects the
+#   --prover <p>        lean4 | isabelle | rocq | fstar (default: lean4). Selects
 #                       skeleton and the verify-pr.yml rebuild template
 #                       written below; recorded as `[project] prover` in the
 #                       generated `.choir/project.toml` (design note 12 §7).
-#                       Isabelle/rocq skeletons and workflow templates are
-#                       UNVALIDATED until the samples slice (note 12 §9).
+#                       Isabelle/rocq/fstar skeletons and workflow templates
+#                       are UNVALIDATED until the samples slice (note 12 §9).
+#                       One fstar profile covers F* and Pulse together: a
+#                       `#lang-pulse` pragma switches an ordinary .fst file
+#                       into Pulse, so they share an extension and a build.
 #
 # This script hard-codes only what is the same for every Choir project:
 #   1. The Lean project base (cloned or skeleton).
@@ -66,7 +71,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 usage() {
-  echo "usage: $0 <owner/name> [--from <git-url>] [--toolchain <pin>] [--public] [--prover lean4|isabelle|rocq]" >&2
+  echo "usage: $0 <owner/name> [--from <git-url>] [--toolchain <pin>] [--public] [--prover lean4|isabelle|rocq|fstar]" >&2
 }
 
 if [[ -z "$TARGET" ]]; then
@@ -75,9 +80,9 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 case "$PROVER" in
-  lean4|isabelle|rocq) ;;
+  lean4|isabelle|rocq|fstar) ;;
   *)
-    echo "unknown --prover: $PROVER (expected one of: lean4, isabelle, rocq)" >&2
+    echo "unknown --prover: $PROVER (expected one of: lean4, isabelle, rocq, fstar)" >&2
     usage
     exit 1
     ;;
@@ -111,6 +116,7 @@ if [[ -z "$TOOLCHAIN" ]]; then
   case "$PROVER" in
     isabelle) TOOLCHAIN="Isabelle2025"; echo "==> Pinning Isabelle: $TOOLCHAIN" ;;
     rocq)     TOOLCHAIN="9.0.0";        echo "==> Pinning Rocq: $TOOLCHAIN" ;;
+    fstar)    TOOLCHAIN="v2026.09.27";  echo "==> Pinning F*: $TOOLCHAIN" ;;
   esac
 fi
 
@@ -206,6 +212,64 @@ lemma choir_placeholder: "True"
 end
 ISATHY
   printf 'heaps/\nbrowser_info/\n__pycache__/\n' > "$PROJECT/.gitignore"
+elif [[ "$PROVER" == "fstar" ]]; then
+  # F* pins per design note 12 §2.2 via project_ref.toolchain (an F*
+  # release tag), not a repo-committed file: F* has no elan equivalent.
+  #
+  # The build recipe below was checked against a local F* toolchain on
+  # both a plain .fst and a `#lang-pulse` module, so the flags are real
+  # rather than transcribed from documentation. It remains UNVALIDATED
+  # in the CI sense (design note 12 §9) until the first fstar sample
+  # project runs it on the pinned release inside verify-pr.
+  echo "==> Creating minimal F*/Pulse skeleton (UNVALIDATED until the samples slice)"
+  mkdir -p "$PROJECT/$LIB"
+  # gate/provers/fstar.py sets build_command=("make","verify"), so the
+  # `verify` target is the contract the gate depends on, not a convenience.
+  cat > "$PROJECT/Makefile" <<MAKEFILE
+# UNVALIDATED in CI (design note 12 §9): exercised at the first fstar sample project.
+FSTAR_EXE ?= fstar.exe
+LIB_DIR   := $LIB
+CACHE_DIR := .cache
+
+# --cache_checked_modules is what makes a rebuild incremental; the gate
+# still rebuilds from a clean checkout, so the cache never carries a
+# stale result across a PR.
+FSTAR_FLAGS := --cache_dir \$(CACHE_DIR) --cache_checked_modules --include \$(LIB_DIR)
+
+# Pulse needs no extra flag on a current release: the syntax extension is
+# in-tree and its library sits on the default include path, so a
+# #lang-pulse module checks under exactly these flags.
+SOURCES := \$(wildcard \$(LIB_DIR)/*.fsti) \$(wildcard \$(LIB_DIR)/*.fst)
+
+.PHONY: verify clean
+
+# One file per invocation, deliberately. Current F* defaults to on-the-fly
+# dependency resolution, which both rejects more than one file on the
+# command line and pulls in each file's dependencies itself -- including
+# other modules in this project -- so the loop needs no topological order.
+# The alternative, --dep full, emits the entire ulib/Pulse closure as
+# targets and would rebuild the standard library.
+#
+# set -e is what makes a failure anywhere fail the build; without it the
+# loop would swallow a failed module and the gate would pass vacuously.
+verify:
+	@mkdir -p \$(CACHE_DIR)
+	@set -e; for f in \$(SOURCES); do \\
+	  echo "==> \$\$f"; \\
+	  \$(FSTAR_EXE) \$(FSTAR_FLAGS) "\$\$f"; \\
+	done
+
+clean:
+	rm -rf \$(CACHE_DIR)
+MAKEFILE
+  cat > "$PROJECT/$LIB/Sample.fst" <<SAMPLEFST
+module Sample
+// UNVALIDATED in CI (design note 12 §9): exercised at the first fstar sample project.
+
+val choir_placeholder (a b: int) : Lemma (a + b == b + a)
+let choir_placeholder a b = ()
+SAMPLEFST
+  printf '.cache/\n*.checked\n__pycache__/\n' > "$PROJECT/.gitignore"
 else
   # UNVALIDATED template (design note 12 §9): exercised at the first
   # rocq sample project. Minimal enough that the repo is coherent; no
@@ -525,6 +589,131 @@ jobs:
         id: build
         continue-on-error: true
         run: isabelle build -D .
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python deps
+        run: uv sync --extra dev
+
+      - name: Run trust report (informational; autodetects changed declarations)
+        if: steps.build.outcome == 'success'
+        run: |
+          uv run python -m gate.verify.trust_report_cli \
+            --workspace . \
+            --base-sha ${{ github.event.pull_request.base.sha }}
+
+      - name: Skip note (rebuild failed upstream)
+        if: steps.build.outcome == 'failure'
+        run: echo "::notice::trust-report skipped — the rebuild failed (see verify-pr)."
+YAML
+  # Substitute the pinned toolchain into both generated workflows.
+  for _wf in verify-pr verify-trust-report; do
+    _content="$(cat ".github/workflows/$_wf.yml")"
+    printf '%s\n' "${_content//__CHOIR_TOOLCHAIN__/$TOOLCHAIN}" > ".github/workflows/$_wf.yml"
+  done
+elif [[ "$PROVER" == "fstar" ]]; then
+  # Same write-then-substitute approach as isabelle above.
+  #
+  # F* ships prebuilt release tarballs, so there is no opam/compiler step:
+  # the pin is a release tag and the asset name is derived from it. Pulse
+  # needs no separate install -- it is in the same tarball and on the
+  # default include path.
+  cat > .github/workflows/verify-pr.yml <<'YAML'
+# UNVALIDATED in CI (design note 12 §9): exercised at the first fstar sample project.
+# The `make verify` recipe it runs was checked against a local F* toolchain
+# on a plain .fst, a #lang-pulse module, and a cross-module dependency,
+# including that a failing module fails the build rather than passing it.
+name: verify-pr
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: choir-verify-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FSTAR_VERSION: "__CHOIR_TOOLCHAIN__"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned F* (${{ env.FSTAR_VERSION }})
+        run: |
+          set -euo pipefail
+          ASSET="fstar-${FSTAR_VERSION}-Linux-x86_64.tar.gz"
+          URL="https://github.com/FStarLang/FStar/releases/download/${FSTAR_VERSION}/${ASSET}"
+          curl -fsSL "$URL" -o /tmp/fstar.tar.gz
+          tar -xzf /tmp/fstar.tar.gz -C /opt
+          echo "/opt/fstar/bin" >> "$GITHUB_PATH"
+
+      - name: Report F* version (pin must be what actually ran)
+        run: fstar.exe --version
+
+      - name: make verify (clean-room rebuild)
+        run: make verify
+YAML
+  cat > .github/workflows/verify-trust-report.yml <<'YAML'
+# UNVALIDATED in CI (design note 12 §9): exercised at the first fstar sample project.
+name: verify-trust-report
+
+# Environment-level trust report (design note 12 §4) — INFORMATIONAL ONLY,
+# never a merge gate. Rebuilds the project, then probes changed declarations
+# via F* --report_assumes. Exits 0 regardless; if the (still-unvalidated)
+# rebuild fails, the probe step is skipped, so this workflow stays quiet
+# until the build is validated. fetch-depth: 0 so the base SHA is reachable
+# by git diff in changed-declaration detection.
+#
+# Scope limit, deliberate and documented in gate/provers/fstar.py:
+# --report_assumes is use-site rather than transitive and never reports
+# `assume val` at all, so this report is an inventory, not a proof of
+# axiom-freedom. The blocking axiom-honesty check reads the source instead.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: choir-verify-trust-report-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trust-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FSTAR_VERSION: "__CHOIR_TOOLCHAIN__"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned F* (${{ env.FSTAR_VERSION }})
+        run: |
+          set -euo pipefail
+          ASSET="fstar-${FSTAR_VERSION}-Linux-x86_64.tar.gz"
+          URL="https://github.com/FStarLang/FStar/releases/download/${FSTAR_VERSION}/${ASSET}"
+          curl -fsSL "$URL" -o /tmp/fstar.tar.gz
+          tar -xzf /tmp/fstar.tar.gz -C /opt
+          echo "/opt/fstar/bin" >> "$GITHUB_PATH"
+
+      - name: make verify (probes need the .checked cache)
+        id: build
+        continue-on-error: true
+        run: make verify
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3

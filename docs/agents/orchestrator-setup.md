@@ -230,15 +230,17 @@ how the working memory was kept — fix it first.
 **If it doesn't exist, bootstrap.** The mechanical part is scripted:
 
 ```bash
-~/.choir/checkout/scripts/new-project.sh <owner/name> [--from <git-url>] [--toolchain <pin>] [--public] [--prover lean4|isabelle|rocq]
+~/.choir/checkout/scripts/new-project.sh <owner/name> [--from <git-url>] [--toolchain <pin>] [--public] [--prover lean4|isabelle|rocq|fstar]
 ```
 
 This gives you the project base, the Choir overlay (packages,
 workflows, issue template), default `.choir/` policy (automation
 `auto`, axiom policy `net_zero`), labels, and a branch-protection
-attempt. `--prover` defaults to `lean4`; the isabelle/rocq templates
+attempt. `--prover` defaults to `lean4`; the isabelle/rocq/fstar templates
 are UNVALIDATED, so review the generated `verify-pr.yml` before
-trusting it on a real project.
+trusting it on a real project. One `fstar` project covers both F* and
+Pulse: a `#lang-pulse` pragma switches an ordinary `.fst` file into
+Pulse, so they share an extension, a build, and a prover profile.
 
 **Never assemble the overlay by hand, and never copy it via
 `cp -r <choir>/.github/workflows`.** That directory is Choir's own
@@ -259,8 +261,8 @@ The project-specific part is yours:
 - **Toolchain**: the overseer fixes the version at creation; a
   `--from` project keeps its own pin instead — the `lean-toolchain`
   file for lean4, or the `project_ref.toolchain` field you stamp on
-  every task for isabelle/rocq, since those provers have no
-  repo-committed toolchain file. Never bump it mid-run.
+  every task for isabelle, rocq, and fstar, since those provers have
+  no repo-committed toolchain file (fstar pins an F* release tag). Never bump it mid-run.
 
   On lean4, say which versions keep the kernel statement gate working
   before the overseer picks. `verify-comparator` builds the comparator at

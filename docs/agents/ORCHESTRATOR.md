@@ -336,7 +336,7 @@ check that never ran means no audit happened (§ Boundaries).
 The gate's checks are basic — regex- and string-level,
 **never semantic**; `verify-comparator` is the one exception. A green run
 proves: it compiles clean-room; the target's statement is unchanged **if
-it existed in base** (`statement-equiv` on isabelle/rocq,
+it existed in base** (`statement-equiv` on isabelle/rocq/fstar,
 `verify-comparator` on lean4 ≥ v4.27); no new axioms, `unsafe`, `partial`,
 `native_decide`, or `extern` beyond project policy; no net-new sorries
 under `block` policy; no new `Decidable` instances or `Classical` escapes.
@@ -384,7 +384,7 @@ check running** — `statement-immutability` is toolchain-blind and still
 blocks there, so what is missing is the kernel check, not a blocking one.
 `statement-equiv`'s red is then the only *additional* signal for the
 target: **read it, never dismiss it as the advisory noise it is elsewhere
-on lean4** — treat it exactly as you would on isabelle/rocq
+on lean4** — treat it exactly as you would on isabelle/rocq/fstar
 (`orchestrator-review.md` § Salvaging a failed PR triages this case).
 **Never apply the lean4-is-covered-by-comparator reflex to a project you
 have not confirmed is at v4.27 or above.**

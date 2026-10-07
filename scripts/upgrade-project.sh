@@ -455,6 +455,59 @@ YAML
       WORKFLOW_TEXT="$(cat "$TARGET/.github/workflows/verify-pr.yml")"
       printf '%s\n' "${WORKFLOW_TEXT//__CHOIR_TOOLCHAIN__/$CHOIR_TOOLCHAIN}" > "$TARGET/.github/workflows/verify-pr.yml"
       ;;
+    fstar)
+      # Same best-effort caveat as isabelle/rocq: regenerates using Choir's
+      # default pin rather than recovering the project's own.
+      CHOIR_TOOLCHAIN="v2026.09.27"
+      echo "NOTE: regenerated verify-pr.yml for prover 'fstar' using Choir's" >&2
+      echo "      default toolchain pin ($CHOIR_TOOLCHAIN) — this does NOT preserve" >&2
+      echo "      a project-specific pin; check it and adjust if needed (the fstar" >&2
+      echo "      template is UNVALIDATED in CI, design note 12 §9)." >&2
+      cat > "$TARGET/.github/workflows/verify-pr.yml" <<'YAML'
+# UNVALIDATED in CI (design note 12 §9): exercised at the first fstar sample project.
+# The `make verify` recipe it runs was checked against a local F* toolchain
+# on a plain .fst, a #lang-pulse module, and a cross-module dependency,
+# including that a failing module fails the build rather than passing it.
+name: verify-pr
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: choir-verify-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FSTAR_VERSION: "__CHOIR_TOOLCHAIN__"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned F* (${{ env.FSTAR_VERSION }})
+        run: |
+          set -euo pipefail
+          ASSET="fstar-${FSTAR_VERSION}-Linux-x86_64.tar.gz"
+          URL="https://github.com/FStarLang/FStar/releases/download/${FSTAR_VERSION}/${ASSET}"
+          curl -fsSL "$URL" -o /tmp/fstar.tar.gz
+          tar -xzf /tmp/fstar.tar.gz -C /opt
+          echo "/opt/fstar/bin" >> "$GITHUB_PATH"
+
+      - name: Report F* version (pin must be what actually ran)
+        run: fstar.exe --version
+
+      - name: make verify (clean-room rebuild)
+        run: make verify
+YAML
+      WORKFLOW_TEXT="$(cat "$TARGET/.github/workflows/verify-pr.yml")"
+      printf '%s\n' "${WORKFLOW_TEXT//__CHOIR_TOOLCHAIN__/$CHOIR_TOOLCHAIN}" > "$TARGET/.github/workflows/verify-pr.yml"
+      ;;
     *)
       echo "error: unknown prover '$PROVER' — cannot regenerate verify-pr.yml" >&2
       exit 1

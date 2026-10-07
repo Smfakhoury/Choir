@@ -46,7 +46,27 @@ def test_rocq_skeleton_has_dune_coq_theory_stanza() -> None:
     assert "(coq.theory" in text
 
 
+def test_fstar_skeleton_ships_the_verify_target_the_gate_invokes() -> None:
+    # gate/provers/fstar.py sets build_command=("make", "verify"), so a
+    # generated F* project without a Makefile `verify` target would fail
+    # the rebuild on every PR rather than at bootstrap, where it is cheap
+    # to notice.
+    text = _text()
+    assert 'cat > "$PROJECT/Makefile"' in text
+    assert "verify:" in text
+
+
+def test_fstar_verify_loop_fails_the_build_on_a_failed_module() -> None:
+    # The F* recipe verifies one file per invocation (current F* resolves
+    # dependencies on the fly and rejects multiple files on the command
+    # line). Without `set -e` the shell loop would swallow a failed module
+    # and the rebuild gate would pass vacuously — the one failure mode
+    # that makes a green PR meaningless.
+    assert "@set -e; for f in" in _text()
+
+
 def test_all_provers_ship_verify_trust_report() -> None:
-    # Each of the three prover branches (lean4, isabelle, rocq) generates a
-    # verify-trust-report workflow — one `name: verify-trust-report` apiece.
-    assert _text().count("name: verify-trust-report") == 3
+    # Each of the four prover branches (lean4, isabelle, rocq, fstar)
+    # generates a verify-trust-report workflow — one
+    # `name: verify-trust-report` apiece.
+    assert _text().count("name: verify-trust-report") == 4

@@ -161,7 +161,7 @@ Triage by *what* failed:
   regardless of what covers the merge decision. The code is unsound:
   **reject it, and if the task still needs doing, re-publish the
   original clean task — never seed a follow-up from the bad diff.**
-- **A red `statement-equiv` on isabelle, rocq, or a lean4 project below
+- **A red `statement-equiv` on isabelle, rocq, fstar, or a lean4 project below
   comparator's v4.27 floor is a triage point, not an auto-reject.** None
   of these three has a kernel-level statement check, so blocking
   coverage differs by prover: on **rocq**, `statement-equiv`'s string
