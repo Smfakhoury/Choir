@@ -1,12 +1,12 @@
-"""Structural checks for the agent plugin (Claude Code + Codex).
+"""Structural checks for the agent plugin (Claude Code + Copilot CLI + Codex).
 
-One shared plugin/ directory serves both harnesses through harness-specific
-manifests (.claude-plugin/ + .codex-plugin/, and the two root marketplace
-files). These tests keep the manifests parseable and version-synced, the
-plugin version explicit (an omitted version makes every repo commit a
-plugin update for installed users), and every repo path the skills
-reference existing, so a future rename breaks this suite, not a user's
-onboarding.
+One shared plugin/ directory serves all three harnesses through
+harness-specific manifests (.claude-plugin/, .github/plugin/ and
+.codex-plugin/, and the three root marketplace files). These tests keep the
+manifests parseable and version-synced, the plugin version explicit (an
+omitted version makes every repo commit a plugin update for installed users),
+and every repo path the skills reference existing, so a future rename breaks
+this suite, not a user's onboarding.
 """
 
 import json
@@ -18,9 +18,11 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 CODEX_MARKETPLACE = REPO_ROOT / ".agents" / "plugins" / "marketplace.json"
+COPILOT_MARKETPLACE = REPO_ROOT / ".github" / "plugin" / "marketplace.json"
 PLUGIN_DIR = REPO_ROOT / "plugin"
 PLUGIN_MANIFEST = PLUGIN_DIR / ".claude-plugin" / "plugin.json"
 CODEX_PLUGIN_MANIFEST = PLUGIN_DIR / ".codex-plugin" / "plugin.json"
+COPILOT_PLUGIN_MANIFEST = PLUGIN_DIR / ".github" / "plugin" / "plugin.json"
 
 SKILLS_DIR = PLUGIN_DIR / "skills"
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
@@ -62,8 +64,8 @@ def test_codex_marketplace_source_resolves_to_plugin_dir() -> None:
 
 
 def test_codex_manifest_mirrors_claude_manifest() -> None:
-    # One plugin, two harness manifests: same identity, same version.
-    # A lone bump would ship different plugin versions to the two harnesses.
+    # One plugin, three harness manifests: same identity, same version.
+    # A lone bump would ship a different version to each harness.
     claude = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
     codex = json.loads(CODEX_PLUGIN_MANIFEST.read_text(encoding="utf-8"))
     assert codex["name"] == claude["name"]
@@ -72,12 +74,55 @@ def test_codex_manifest_mirrors_claude_manifest() -> None:
     assert codex["description"] == claude["description"]
 
 
+def test_copilot_marketplace_source_resolves_to_plugin_dir() -> None:
+    # Copilot CLI checks marketplace.json, .plugin/, .github/plugin/ and
+    # .claude-plugin/ in that order; .github/plugin/ is its own convention.
+    data = json.loads(COPILOT_MARKETPLACE.read_text(encoding="utf-8"))
+    assert data["name"] == "choir"
+    assert data["owner"]["name"]
+    (entry,) = data["plugins"]
+    assert entry["name"] == "choir"
+    source = (REPO_ROOT / entry["source"]).resolve()
+    assert source == PLUGIN_DIR.resolve()
+    assert source.is_dir()
+
+
+def test_copilot_manifest_mirrors_claude_manifest() -> None:
+    claude = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    copilot = json.loads(COPILOT_PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    assert copilot["name"] == claude["name"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", copilot["version"])
+    assert copilot["version"] == claude["version"]
+    assert copilot["description"] == claude["description"]
+
+
+def test_copilot_component_paths_exist() -> None:
+    # Copilot's manifests name the skills and commands directories outright
+    # instead of relying on discovery defaults, so a rename breaks here
+    # rather than shipping a plugin with nothing in it.
+    manifest = json.loads(COPILOT_PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+    (entry,) = json.loads(COPILOT_MARKETPLACE.read_text(encoding="utf-8"))["plugins"]
+    for source in (manifest, entry):
+        for field in ("skills", "commands"):
+            assert (PLUGIN_DIR / source[field]).is_dir(), f"{field}: {source[field]}"
+    assert manifest["skills"] == entry["skills"]
+    assert manifest["commands"] == entry["commands"]
+
+
 def test_skill_frontmatter_name_matches_directory() -> None:
-    # Codex requires `name`; Claude Code derives it from the directory.
-    # Keeping them equal keeps one skill identity across both harnesses.
+    # Codex and Copilot CLI require `name`; Claude Code derives it from the
+    # directory. Keeping them equal keeps one skill identity across all three.
     for skill_md in _skill_files():
         fm = _frontmatter(skill_md)
         assert fm.get("name") == skill_md.parent.name, f"{skill_md}"
+
+
+def test_skill_frontmatter_carries_a_description() -> None:
+    # Copilot CLI requires `description`, and every harness matches a skill
+    # to a request through it. Without one the skill never gets invoked.
+    for skill_md in _skill_files():
+        description = _frontmatter(skill_md).get("description")
+        assert isinstance(description, str) and description.strip(), f"{skill_md}"
 
 
 def test_public_copy_follows_public_pitch_rule() -> None:
@@ -86,8 +131,10 @@ def test_public_copy_follows_public_pitch_rule() -> None:
     public_texts = [
         MARKETPLACE,
         CODEX_MARKETPLACE,
+        COPILOT_MARKETPLACE,
         PLUGIN_MANIFEST,
         CODEX_PLUGIN_MANIFEST,
+        COPILOT_PLUGIN_MANIFEST,
         REPO_ROOT / "README.md",
         *_skill_files(),
     ]
