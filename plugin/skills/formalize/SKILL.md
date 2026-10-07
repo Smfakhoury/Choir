@@ -23,7 +23,13 @@ never improvise a step the playbook or its scripts already own.
 
 2. **Ensure a Choir checkout at `~/.choir/checkout`.** If missing:
 
-       gh repo clone Weber-GeoML/Choir ~/.choir/checkout
+       gh repo clone Smfakhoury/Choir ~/.choir/checkout
+
+   This fork is upstream `Weber-GeoML/Choir` plus the F*/Pulse prover
+   profile, which upstream does not carry. Clone upstream instead if the
+   project is lean4/isabelle/rocq and you want the canonical checkout —
+   but an `fstar` project needs this one, or `gate/provers/select.py`
+   cannot resolve its prover.
 
    If `gh` is missing or unauthenticated, have the user install it and run
    `gh auth login` first.

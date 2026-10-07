@@ -15,7 +15,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-DEFAULT_CHOIR_URL = "https://github.com/Weber-GeoML/Choir.git"
+# This fork carries the F*/Pulse prover profile that upstream
+# `Weber-GeoML/Choir` does not. A contributor cloning upstream gets a
+# checkout with no `gate/provers/fstar.py`, so an `fstar` project's gate
+# cannot run on their machine. Override with `--choir-url` to point
+# contributors at a different checkout.
+DEFAULT_CHOIR_URL = "https://github.com/Smfakhoury/Choir.git"
 
 _TEMPLATE = """\
 You are a Choir contributor (worker agent) for the project **`{repo}`**.
